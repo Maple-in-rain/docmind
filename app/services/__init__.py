@@ -7,9 +7,11 @@
 from ..chunking.fixed_chunker import FixedChunker
 from ..config import settings
 from ..embeddings.siliconflow_provider import SiliconFlowEmbeddingProvider
+from ..llm.deepseek_provider import DeepSeekProvider
 from ..retrieval.vector_store import ChromaVectorStore
 from ..storage.db import Database
 from ..storage.file_store import FileStore
+from .chat_service import ChatService
 from .ingestion_service import IngestionService
 from .search_service import SearchService
 
@@ -22,6 +24,7 @@ def build_services() -> dict:
     db = Database()
     file_store = FileStore()
     chunker = FixedChunker(settings.chunk_size, settings.chunk_overlap)
+    llm = DeepSeekProvider()
 
     return {
         "embedder": embedder,
@@ -29,6 +32,8 @@ def build_services() -> dict:
         "db": db,
         "file_store": file_store,
         "chunker": chunker,
+        "llm": llm,
         "ingestion": IngestionService(file_store, chunker, embedder, vector_store, db),
         "search": SearchService(embedder, vector_store, db),
+        "chat": ChatService(embedder, vector_store, llm),
     }

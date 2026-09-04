@@ -9,8 +9,9 @@
 - [x] 文档上传与解析：PDF / Word / Markdown / TXT（含 GBK 编码自动探测）
 - [x] 固定窗口分块（token 估算）+ 块间重叠
 - [x] 向量化入库（Chroma + bge-m3 embedding）
-- [x] 检索调试端点（`/api/search`，可视化双路召回排名）
-- [ ] 流式问答 + 多轮对话 + 引用溯源（第 2 周）
+- [x] 检索调试端点（`/api/search`）
+- [x] 流式问答（SSE）+ 多轮对话 + 引用溯源
+- [x] 聊天前端：手写 HTML/CSS/JS 单页（书斋主题，零框架零构建）
 - [ ] 混合检索：BM25 + 向量 + RRF 融合 + 重排（第 3 周）
 - [ ] 检索质量评估体系 + 压测报告（第 3-4 周）
 - [ ] 云服务器部署上线（第 4 周）
@@ -78,6 +79,7 @@ flowchart LR
 | GET | `/api/documents` | 文档列表 |
 | DELETE | `/api/documents/{doc_id}` | 删除文档（向量+元数据同步清理） |
 | POST | `/api/search` | 检索调试（strategy: vector/bm25/hybrid） |
+| POST | `/api/chat` | 聊天，默认 SSE 流式（`stream:false` 返回完整 JSON），支持多轮 |
 | GET | `/api/health` | 健康检查 + 统计 |
 
 完整接口文档：启动后访问 `/docs`。

@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import documents, health, search
+from .api import chat, documents, health, search
 from .services import build_services
 
 app = FastAPI(
@@ -34,6 +34,7 @@ app.state.services = build_services()
 app.include_router(health.router)
 app.include_router(documents.router)
 app.include_router(search.router)
+app.include_router(chat.router)
 
 _frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")
