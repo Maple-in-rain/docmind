@@ -4,6 +4,13 @@
     python -X utf8 -m eval.evaluate                     # 全量 36 格（真实 API）
     python -X utf8 -m eval.evaluate --only chunk512_o50_hybrid_on
 
+评估口径（重要，面试可讲）：
+- 相关性判定是**段落级**：测试集每条 QA 记录答案出处段落（source_passage），
+  检索块与出处段落的余弦相似度 ≥ 阈值才算相关（近似段落级 qrels）；
+- 为什么不用文档级：15 篇语料上文档级 top-10 召回必然饱和（全 1.0），
+  指标失去区分度——这是本项目第一轮网格实验实测发现的，收紧到段落级后
+  才能真实区分分块/策略/重排的优劣。
+
 输出：eval/results/grid_results.csv（UTF-8-sig，Excel 可直接打开）+ 控制台汇总表。
 
 网格设计：分块 {256,512,768} × 重叠 {0,50} × 策略 {vector,bm25,hybrid} × 重排 {关,开}
@@ -23,6 +30,8 @@ import shutil
 import sys
 from itertools import product
 from pathlib import Path
+
+import numpy as np
 
 from app.chunking.fixed_chunker import FixedChunker
 from app.embeddings.siliconflow_provider import SiliconFlowEmbeddingProvider
@@ -44,6 +53,10 @@ OVERLAPS = (0, 50)
 STRATEGIES = ("vector", "bm25", "hybrid")
 RERANK_FLAGS = (False, True)
 TOP_K = 10
+
+# 段落级相关性阈值：检索块与答案出处段落的余弦相似度达到该值才算命中。
+# bge-m3 对近同源文本相似度约 0.85+，同主题不同段落约 0.5~0.7。
+_PASSAGE_SIM_THRESHOLD = 0.8
 
 
 def build_cells() -> list[dict]:
@@ -106,16 +119,18 @@ def run_cell(
     chunk_cache: dict,
     testset: list[dict],
     workdir: Path,
+    passage_threshold: float = _PASSAGE_SIM_THRESHOLD,
 ) -> dict:
-    """单个格子：独立数据目录重建索引 → 全量测试集检索 → 指标汇总"""
+    """单个格子：独立数据目录重建索引 → 段落级 qrels → 指标汇总"""
     shutil.rmtree(workdir, ignore_errors=True)
     workdir.mkdir(parents=True, exist_ok=True)
 
     db = Database(workdir / "docmind.db")
     vector_store = ChromaVectorStore(workdir / "chroma", dim=embedder.dim)
 
-    # 入库（复用缓存的解析/向量结果，只写存储层）
+    # 入库（复用缓存的解析/向量结果，只写存储层），同时收集 chunk_id → 向量
     name_to_doc_id: dict[str, int] = {}
+    chunk_id_to_emb: dict[str, list[float]] = {}
     for doc_name, (chunks, embeddings) in chunk_cache[(cfg["chunk_size"], cfg["overlap"])].items():
         doc_id = db.add_document(doc_name, doc_name, doc_name, len(chunks))
         chunk_ids = [f"{doc_id}-{i}" for i in range(len(chunks))]
@@ -127,23 +142,43 @@ def run_cell(
             metadatas=[{"doc_id": doc_id, "seq": i, "title": doc_name} for i in range(len(chunks))],
         )
         name_to_doc_id[doc_name] = doc_id
+        for cid, emb in zip(chunk_ids, embeddings):
+            chunk_id_to_emb[cid] = emb
+
+    # 语料向量矩阵（行归一化后余弦相似度 = 点积）
+    all_ids = list(chunk_id_to_emb)
+    emb_matrix = np.asarray([chunk_id_to_emb[cid] for cid in all_ids], dtype=np.float64)
+    norms = np.linalg.norm(emb_matrix, axis=1, keepdims=True)
+    emb_matrix = emb_matrix / np.maximum(norms, 1e-12)
 
     bm25_index = BM25Index(db)
     search = SearchService(embedder, vector_store, db, bm25_index, reranker)
 
     queries = []
+    skipped = 0
     for item in testset:
-        doc_id = name_to_doc_id.get(item["doc"])
-        if doc_id is None:
+        if item.get("doc") not in name_to_doc_id:
             print(f"  警告：测试集引用了语料中不存在的文档 {item['doc']}，跳过", file=sys.stderr)
+            skipped += 1
+            continue
+        if not item.get("source_passage"):
+            skipped += 1
+            continue
+        # 段落级 qrels：与答案出处段落相似度达阈值的块都是相关块
+        gold = np.asarray(embedder.embed([item["source_passage"]])[0], dtype=np.float64)
+        gold = gold / (np.linalg.norm(gold) + 1e-12)
+        sims = emb_matrix @ gold
+        relevant = {all_ids[i] for i in np.where(sims >= passage_threshold)[0]}
+        if not relevant:
+            skipped += 1  # 出处段落在该分块配置下被切散，无块达到阈值，跳过该题
             continue
         results = search.search(item["question"], cfg["strategy"], TOP_K, rerank=cfg["rerank"])
-        retrieved = list(dict.fromkeys(r["doc_id"] for r in results))  # 去重保序
-        queries.append(({doc_id}, retrieved))
+        retrieved = list(dict.fromkeys(r["chunk_id"] for r in results))  # 去重保序
+        queries.append((relevant, retrieved))
 
     metrics = evaluate(queries)
     shutil.rmtree(workdir, ignore_errors=True)  # 跑完即清理，结果只在 CSV
-    return {**cfg, "n_queries": len(queries), **metrics}
+    return {**cfg, "n_queries": len(queries), "n_skipped": skipped, **metrics}
 
 
 class _MemoizedEmbedder:
@@ -191,6 +226,7 @@ def run_grid(
     testset: list[dict],
     output_csv: Path,
     workdir_root: Path,
+    passage_threshold: float = _PASSAGE_SIM_THRESHOLD,
 ) -> list[dict]:
     embedder = _MemoizedEmbedder(embedder)  # 分块/查询向量全部按文本缓存复用
     # 缓存配置从本次要跑的格子推导（只向量化这些格子用到的分块配置）
@@ -208,7 +244,8 @@ def run_grid(
             continue
         print(f"[{cfg['name']}] 运行中 ...", flush=True)
         try:
-            row = run_cell(cfg, embedder, reranker, chunk_cache, testset, workdir_root / cfg["name"])
+            row = run_cell(cfg, embedder, reranker, chunk_cache, testset,
+                           workdir_root / cfg["name"], passage_threshold=passage_threshold)
         except Exception as e:
             # 单格失败不中断整批（限流等瞬时错误），重跑本命令即可续跑
             print(f"[{cfg['name']}] 失败：{e}（重跑本命令可续跑剩余格子）", file=sys.stderr, flush=True)
