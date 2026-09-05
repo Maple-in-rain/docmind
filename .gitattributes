@@ -1,2 +1,6 @@
 # Windows 批处理脚本必须保持 CRLF 换行，否则 cmd 无法正确执行
 *.bat text eol=crlf
+
+# 数据文件统一 LF（jsonl/csv 在 Windows 与 Linux 间流转，避免 CRLF 噪音）
+*.jsonl text eol=lf
+*.csv text eol=lf
