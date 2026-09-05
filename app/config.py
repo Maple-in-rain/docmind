@@ -24,10 +24,11 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
 
-    # ---- Embedding（硅基流动）----
+    # ---- Embedding / Rerank（硅基流动）----
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
     embedding_model: str = "BAAI/bge-m3"
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
 
     # ---- 检索参数（默认值待第 3 周评估实验用数据定稿）----
     chunk_size: int = 512

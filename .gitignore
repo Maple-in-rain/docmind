@@ -9,12 +9,12 @@ venv/
 # 环境变量（含 API key，严禁提交）
 .env
 
-# 运行数据（本地持久化的向量库 / 元数据 / 上传文件）
-data/
+# 运行数据（本地持久化的向量库 / 元数据 / 上传文件，仅项目根目录；
+# 注意 eval/data/ 是评估语料与测试集，必须提交）
+/data/
 
-# 评估报告与压测产物
-eval/reports/*
-!eval/reports/.gitkeep
+# 评估产物（生成文件）与压测报告
+eval/results/
 locust_report*
 
 # IDE

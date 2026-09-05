@@ -290,6 +290,128 @@ async function postChatSSE(body, onEvent) {
   }
 }
 
+// ---------- 检索台（调试面板） ----------
+
+const STRATEGY_LABELS = { vector: "向量检索", bm25: "BM25 关键词", hybrid: "混合 RRF" };
+
+function openDebug() {
+  $("#debug-overlay").hidden = false;
+  $("#debug-query").focus();
+}
+
+function closeDebug() {
+  $("#debug-overlay").hidden = true;
+}
+
+/** 一次检索同时请求三种策略，并排渲染，直观对比"混合检索为什么更好" */
+async function runDebugSearch() {
+  const query = $("#debug-query").value.trim();
+  if (!query) return;
+  const topK = Number($("#debug-topk").value);
+  const rerank = $("#debug-rerank").checked;
+  const columnsEl = $("#debug-columns");
+
+  columnsEl.textContent = "";
+  const colEls = ["vector", "bm25", "hybrid"].map((strategy) => {
+    const col = document.createElement("div");
+    col.className = "debug-col";
+    col.appendChild(makeDebugHead(STRATEGY_LABELS[strategy]));
+    const loading = document.createElement("div");
+    loading.className = "debug-loading";
+    loading.textContent = "检索中…";
+    col.appendChild(loading);
+    columnsEl.appendChild(col);
+    return col;
+  });
+
+  const hitsByStrategy = await Promise.all(
+    ["vector", "bm25", "hybrid"].map((s) =>
+      fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, strategy: s, top_k: topK, rerank }),
+      })
+        .then((r) => r.json())
+        .catch(() => [])
+    )
+  );
+
+  colEls.forEach((col, i) => {
+    col.textContent = "";
+    col.appendChild(makeDebugHead(STRATEGY_LABELS[["vector", "bm25", "hybrid"][i]]));
+    renderDebugColumn(col, hitsByStrategy[i]);
+  });
+}
+
+function makeDebugHead(label) {
+  const h = document.createElement("h3");
+  h.textContent = label;
+  return h;
+}
+
+function renderDebugColumn(colEl, hits) {
+  if (!hits.length) {
+    const empty = document.createElement("div");
+    empty.className = "debug-empty";
+    empty.textContent = "无命中";
+    colEl.appendChild(empty);
+    return;
+  }
+  hits.forEach((hit, i) => {
+    const card = document.createElement("div");
+    card.className = "debug-card";
+
+    const rank = document.createElement("span");
+    rank.className = "debug-rank";
+    rank.textContent = String(i + 1);
+
+    const body = document.createElement("div");
+    body.className = "debug-card-body";
+    const title = document.createElement("div");
+    title.className = "debug-card-title";
+    title.textContent = hit.title || "（未命名文档）";
+    const text = document.createElement("div");
+    text.className = "debug-card-text";
+    text.textContent = hit.text;
+    const meta = document.createElement("div");
+    meta.className = "debug-card-meta";
+    if (hit.rank_vector != null) meta.appendChild(makeBadge(`向量路 #${hit.rank_vector}`, "badge-vector"));
+    if (hit.rank_bm25 != null) meta.appendChild(makeBadge(`BM25 路 #${hit.rank_bm25}`, "badge-bm25"));
+    const scoreLabel =
+      hit.rerank_score != null
+        ? `重排分 ${hit.rerank_score.toFixed(3)}`
+        : `score ${hit.score != null ? hit.score.toFixed(3) : "-"}`;
+    meta.appendChild(makeBadge(scoreLabel, "badge-score"));
+
+    body.append(title, text, meta);
+    card.append(rank, body);
+    colEl.appendChild(card);
+  });
+}
+
+function makeBadge(label, cls) {
+  const b = document.createElement("span");
+  b.className = `debug-badge ${cls}`;
+  b.textContent = label;
+  return b;
+}
+
+function bindDebug() {
+  $("#debug-btn").addEventListener("click", openDebug);
+  $("#debug-close").addEventListener("click", closeDebug);
+  $("#debug-overlay").addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) closeDebug(); // 点击遮罩关闭
+  });
+  $("#debug-run").addEventListener("click", runDebugSearch);
+  $("#debug-query").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runDebugSearch();
+    if (e.key === "Escape") closeDebug();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#debug-overlay").hidden) closeDebug();
+  });
+}
+
 // ---------- 交互绑定 ----------
 
 function bindSend() {
@@ -342,3 +464,4 @@ loadDocs();
 bindSend();
 bindUpload();
 bindMisc();
+bindDebug();

@@ -5,7 +5,7 @@ import pytest
 from app.retrieval.bm25_index import BM25Index
 from app.services.search_service import SearchService
 from app.storage.db import Database
-from tests.helpers import FakeEmbedder
+from tests.helpers import FakeEmbedder, FakeReranker
 
 
 class FakeVectorStore:
@@ -42,14 +42,13 @@ class ExplodingEmbedder(FakeEmbedder):
         raise AssertionError("bm25 策略不应调用 embedding")
 
 
-@pytest.fixture
-def search_service(tmp_path):
+def _seed(tmp_path):
+    """种子数据：两个文档各两块，返回服务组装所需的全部组件"""
     db = Database(tmp_path / "test.db")
     embedder = FakeEmbedder()
     vector_store = FakeVectorStore()
     bm25_index = BM25Index(db)
 
-    # 种子数据：两个文档各两块
     doc1 = db.add_document("快速排序", "qs.md", "qs-stored.md", 2)
     doc2 = db.add_document("哈希表", "hash.md", "hash-stored.md", 2)
     db.add_chunks(
@@ -79,6 +78,12 @@ def search_service(tmp_path):
         ],
     )
     bm25_index.rebuild()
+    return db, embedder, vector_store, bm25_index
+
+
+@pytest.fixture
+def search_service(tmp_path):
+    db, embedder, vector_store, bm25_index = _seed(tmp_path)
     return SearchService(embedder, vector_store, db, bm25_index)
 
 
@@ -136,9 +141,30 @@ def test_hybrid_order_matches_rrf(search_service):
             assert r["rank_bm25"] is None
 
 
-def test_rerank_not_implemented(search_service):
-    with pytest.raises(ValueError, match="重排"):
+def test_rerank_without_reranker_raises(search_service):
+    with pytest.raises(RuntimeError, match="重排未配置"):
         search_service.search("快速排序", "vector", rerank=True)
+
+
+def test_rerank_reorders_and_adds_score(tmp_path):
+    """FakeReranker 按查询共有字符数打分：含'快速排序'的分块应被重排到首位"""
+    db, embedder, vector_store, bm25_index = _seed(tmp_path)
+    service = SearchService(embedder, vector_store, db, bm25_index, FakeReranker())
+
+    results = service.search("快速排序", "vector", top_k=10, rerank=True)
+    assert results, "重排后无结果"
+    assert results[0]["text"] == "快速排序是一种分治算法"
+    assert results[0]["rerank_score"] == 4  # 与查询共有 4 个字符
+    assert all(r["rerank_score"] is not None for r in results)
+    assert all(r["rank_vector"] is not None for r in results), "检索排名应保留（重排前的名次）"
+
+
+def test_rerank_truncates_to_top_k(tmp_path):
+    db, embedder, vector_store, bm25_index = _seed(tmp_path)
+    service = SearchService(embedder, vector_store, db, bm25_index, FakeReranker())
+
+    results = service.search("快速排序", "vector", top_k=2, rerank=True)
+    assert len(results) == 2
 
 
 def test_unknown_strategy(search_service):

@@ -29,10 +29,12 @@ uvicorn app.main:app --reload
 
 ## 第 3 周：混合检索 + 评估
 
-- [ ] `/api/search` 三种策略（vector / bm25 / hybrid）均可返回结果
-- [ ] 前端检索调试面板显示双路各自排名
-- [ ] `python eval/evaluate.py` 一条命令输出全量对比表
-- [ ] 开启/关闭重排均有结果（`rerank: true/false`）
+- [ ] `/api/search` 三种策略（vector / bm25 / hybrid）均可返回结果，bm25/hybrid 结果带 `rank_bm25`、`rank_vector` 字段
+- [ ] 同一条查询三策略对比：`curl -X POST http://127.0.0.1:8000/api/search -H "Content-Type: application/json" -d '{"query":"什么是RAG","strategy":"hybrid","top_k":5}'`
+- [ ] 开启重排有结果且带 `rerank_score` 字段（`"rerank": true`）
+- [ ] 浏览器点击侧栏「检索台」：三策略并排显示、徽章展示两路排名、重排开关生效、Esc 关闭
+- [ ] 测试集已生成（`eval/data/testset.jsonl`），按 `eval/data/testset.review.md` 抽查约 20% 并记录结论
+- [ ] `python -X utf8 -m eval.evaluate` 一条命令输出全量对比表，`eval/results/grid_results.csv` 已生成
 
 ## 第 4 周：部署 + 压测
 

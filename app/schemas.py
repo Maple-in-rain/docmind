@@ -42,8 +42,9 @@ class SearchResult(BaseModel):
     seq: int | None = None
     title: str = ""
     score: float | None = None          # 检索分数：vector=余弦相似度 / bm25=BM25 分 / hybrid=RRF 分
-    rank_vector: int | None = None      # 向量路排名（未参与该路的策略为 None）
-    rank_bm25: int | None = None        # BM25 路排名（未参与该路的策略为 None）
+    rerank_score: float | None = None   # 重排相关性分数（rerank 开启时才有值）
+    rank_vector: int | None = None      # 向量路排名（重排前的检索排名，未参与该路为 None）
+    rank_bm25: int | None = None        # BM25 路排名（重排前的检索排名，未参与该路为 None）
 
 
 # ---- 聊天（第 2 周启用）----

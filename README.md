@@ -12,9 +12,11 @@
 - [x] 检索调试端点（`/api/search`，vector / bm25 / hybrid 三策略）
 - [x] 混合检索：BM25（jieba + rank-bm25，随文档增删同步重建）+ 向量 + RRF 融合
 - [x] 自写 `MyBM25` 与 rank-bm25 逐分对拍（误差 < 1e-6，见 `tests/test_bm25.py`）
+- [x] 重排：bge-reranker-v2-m3 精排候选集（可开关，"宽召回 + 精排序"）
+- [x] 检索质量评估：LLM 反向生成测试集（90 条 QA）+ 手写 recall@k / MRR + 36 格网格实验
+- [x] 前端「检索台」调试面板：三策略并排对比、两路排名徽章互参
 - [x] 流式问答（SSE）+ 多轮对话 + 引用溯源
 - [x] 聊天前端：手写 HTML/CSS/JS 单页（书斋主题，零框架零构建）
-- [ ] 重排 + 检索质量评估体系（第 3 周）
 - [ ] 压测报告（第 4 周）
 - [ ] 云服务器部署上线（第 4 周）
 
@@ -27,6 +29,8 @@
 | Embedding | 硅基流动 BAAI/bge-m3（1024 维，免费额度） |
 | 关键词检索 | BM25（jieba 分词 + rank-bm25，SQLite 全量重建，自写 `MyBM25` 对拍验证） |
 | 混合融合 | RRF 倒数排名融合（k=60） |
+| 重排 | BAAI/bge-reranker-v2-m3（cross-encoder 精排候选集，可开关） |
+| 检索评估 | 自建测试集（LLM 反向生成 + 人工抽查）+ 手写 recall@k/MRR + 网格实验 |
 | 大模型 | DeepSeek（OpenAI 兼容，httpx 手写 SSE 流式客户端） |
 | 文档解析 | PyMuPDF / python-docx / charset-normalizer |
 | 元数据 | SQLite（标准库） |
@@ -85,7 +89,7 @@ flowchart LR
 | POST | `/api/documents/upload` | 上传文档并入库（multipart） |
 | GET | `/api/documents` | 文档列表 |
 | DELETE | `/api/documents/{doc_id}` | 删除文档（向量+元数据同步清理） |
-| POST | `/api/search` | 检索调试（strategy: vector/bm25/hybrid） |
+| POST | `/api/search` | 检索调试（strategy: vector/bm25/hybrid，可选 rerank） |
 | POST | `/api/chat` | 聊天，默认 SSE 流式（`stream:false` 返回完整 JSON），支持多轮 |
 | GET | `/api/health` | 健康检查 + 统计 |
 
@@ -101,16 +105,22 @@ app/
 ├── chunking/     # 分块策略插件（固定窗口，标题结构规划中）
 ├── embeddings/   # 向量化插件（硅基流动 API）
 ├── retrieval/    # 检索插件（向量库、BM25、RRF 融合）
+├── reranking/    # 重排插件（bge-reranker 精排候选集）
 ├── llm/          # 大模型插件（DeepSeek 流式客户端）
 └── storage/      # SQLite 元数据 + 文件落盘
+
+eval/
+├── metrics.py          # 手写 recall@k / MRR@k（含单测）
+├── evaluate.py         # 网格实验：分块×重叠×策略×重排，一键复现
+├── testset_builder.py  # DeepSeek 反向生成测试集
+└── data/               # 语料（15 篇技术文档）+ 测试集（90 条 QA）+ 抽查记录
 ```
 
 分层原则：**依赖抽象接口，不依赖具体实现** —— 换供应商只需新增插件类 + 改配置。
 
 ## Roadmap
 
-- [ ] 重排（bge-reranker-v2-m3，可开关）
-- [ ] 检索质量评估体系（测试集 + recall@k/MRR + 网格实验）
+- [ ] 聊天链路启用重排/混合检索（待网格实验数据定稿默认参数）
 - [ ] BM25 索引磁盘序列化 / 增量合并（当前为 SQLite 全量重建，<100 文档毫秒级）
 - [ ] Markdown 标题结构化分块
 - [ ] 大文件异步入库（任务队列）

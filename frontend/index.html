@@ -29,6 +29,7 @@
     <ul class="doc-list" id="doc-list"></ul>
 
     <div class="sidebar-foot">
+      <button class="btn-ghost" id="debug-btn">检索台</button>
       <button class="btn-ghost" id="refresh-btn">刷新</button>
       <span class="foot-note">FastAPI + Chroma + DeepSeek</span>
     </div>
@@ -63,6 +64,33 @@
     </div>
     <p class="composer-hint">回答由 DeepSeek 生成 · 引用来自你的文档 · 流式输出</p>
   </main>
+
+  <!-- 检索台：三策略并排对比的检索调试面板 -->
+  <div class="debug-overlay" id="debug-overlay" hidden>
+    <div class="debug-panel">
+      <header class="debug-head">
+        <h2>检索台<span class="debug-sub">三策略并排 · 排名互参</span></h2>
+        <button class="debug-close" id="debug-close" title="关闭（Esc）">✕</button>
+      </header>
+      <div class="debug-controls">
+        <input id="debug-query" type="text" placeholder="输入检索词，回车查看三条路径的排名" />
+        <label class="debug-rerank" title="对候选集用 bge-reranker 精排">
+          <input type="checkbox" id="debug-rerank" /> 重排
+        </label>
+        <label class="debug-topk">
+          top_k
+          <select id="debug-topk">
+            <option>3</option>
+            <option selected>5</option>
+            <option>10</option>
+          </select>
+        </label>
+        <button class="btn-ghost debug-run" id="debug-run">检索</button>
+      </div>
+      <div class="debug-columns" id="debug-columns"></div>
+      <p class="debug-hint">rank 徽章为该分块在对应路的重排前名次 · hybrid 用 RRF 融合排名 · 分数仅同策略内可比</p>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
