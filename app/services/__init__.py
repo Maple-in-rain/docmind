@@ -30,6 +30,7 @@ def build_services() -> dict:
     reranker = SiliconFlowRerankerProvider()
     llm = DeepSeekProvider()
 
+    search_service = SearchService(embedder, vector_store, db, bm25_index, reranker)
     return {
         "embedder": embedder,
         "vector_store": vector_store,
@@ -40,6 +41,6 @@ def build_services() -> dict:
         "reranker": reranker,
         "llm": llm,
         "ingestion": IngestionService(file_store, chunker, embedder, vector_store, db, bm25_index),
-        "search": SearchService(embedder, vector_store, db, bm25_index, reranker),
-        "chat": ChatService(embedder, vector_store, llm),
+        "search": search_service,
+        "chat": ChatService(search_service, llm),  # 问答复用检索服务：hybrid + 重排
     }

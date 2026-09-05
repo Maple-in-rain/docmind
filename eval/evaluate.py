@@ -112,25 +112,79 @@ def prepare_chunk_cache(corpus: list[dict], embedder, chunk_sizes=CHUNK_SIZES, o
     return cache
 
 
+def _normalize_rows(matrix: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    return matrix / np.maximum(norms, 1e-12)
+
+
+def prepare_qrels(
+    chunk_cache: dict,
+    corpus: list[dict],
+    embedder,
+    testset: list[dict],
+    passage_threshold: float = _PASSAGE_SIM_THRESHOLD,
+) -> dict:
+    """预计算每种分块配置的段落级 qrels。
+
+    返回 {(chunk_size, overlap): {query_id: {相关块的语料全局下标}}}。
+    全局下标按「语料文档顺序 × 块顺序」展平，与 run_cell 的入库顺序一致。
+    """
+    qrels = {}
+    for (size, overlap), per_doc in chunk_cache.items():
+        # 展平成全局块向量矩阵（顺序必须与 run_cell 的入库顺序一致）
+        all_embeddings = []
+        for doc in corpus:
+            _chunks, embs = per_doc[doc["name"]]
+            all_embeddings.extend(embs)
+        emb_matrix = _normalize_rows(np.asarray(all_embeddings, dtype=np.float64))
+
+        per_config: dict[int, set[int]] = {}
+        for item in testset:
+            if not item.get("source_passage"):
+                continue
+            gold = _normalize_rows(np.asarray([embedder.embed([item["source_passage"]])[0]], dtype=np.float64))[0]
+            sims = emb_matrix @ gold
+            per_config[item["id"]] = {int(i) for i in np.where(sims >= passage_threshold)[0]}
+        qrels[(size, overlap)] = per_config
+    return qrels
+
+
+def common_queries(qrels: dict, testset: list[dict]) -> list[dict]:
+    """统一评估子集：只保留在全部相关分块配置下都可判定的查询。
+
+    出处段落在小分块下可能被切散（无块达到相似度阈值），若各配置各跑各的
+    查询子集，跨配置指标对比就不公平——取交集后所有格子跑同一批查询。
+    """
+    configs = list(qrels.values())
+    if not configs:
+        return []
+    ids = [item["id"] for item in testset if all(item["id"] in cfg and cfg[item["id"]] for cfg in configs)]
+    return [t for t in testset if t["id"] in ids]
+
+
 def run_cell(
     cfg: dict,
     embedder,
     reranker,
     chunk_cache: dict,
     testset: list[dict],
+    qrels_for_config: dict[int, set[int]],
     workdir: Path,
-    passage_threshold: float = _PASSAGE_SIM_THRESHOLD,
 ) -> dict:
-    """单个格子：独立数据目录重建索引 → 段落级 qrels → 指标汇总"""
+    """单个格子：独立数据目录重建索引 → 段落级 qrels → 指标汇总。
+
+    qrels_for_config：{query_id: {相关块的语料全局下标}}（prepare_qrels 预计算），
+    全局下标与入库顺序一致，run_cell 内映射回 chunk_id。
+    """
     shutil.rmtree(workdir, ignore_errors=True)
     workdir.mkdir(parents=True, exist_ok=True)
 
     db = Database(workdir / "docmind.db")
     vector_store = ChromaVectorStore(workdir / "chroma", dim=embedder.dim)
 
-    # 入库（复用缓存的解析/向量结果，只写存储层），同时收集 chunk_id → 向量
+    # 入库（复用缓存的解析/向量结果，只写存储层），同时记录全局下标 → chunk_id 映射
     name_to_doc_id: dict[str, int] = {}
-    chunk_id_to_emb: dict[str, list[float]] = {}
+    global_id_order: list[str] = []  # 下标 i 对应入库顺序的第 i 个块
     for doc_name, (chunks, embeddings) in chunk_cache[(cfg["chunk_size"], cfg["overlap"])].items():
         doc_id = db.add_document(doc_name, doc_name, doc_name, len(chunks))
         chunk_ids = [f"{doc_id}-{i}" for i in range(len(chunks))]
@@ -142,14 +196,7 @@ def run_cell(
             metadatas=[{"doc_id": doc_id, "seq": i, "title": doc_name} for i in range(len(chunks))],
         )
         name_to_doc_id[doc_name] = doc_id
-        for cid, emb in zip(chunk_ids, embeddings):
-            chunk_id_to_emb[cid] = emb
-
-    # 语料向量矩阵（行归一化后余弦相似度 = 点积）
-    all_ids = list(chunk_id_to_emb)
-    emb_matrix = np.asarray([chunk_id_to_emb[cid] for cid in all_ids], dtype=np.float64)
-    norms = np.linalg.norm(emb_matrix, axis=1, keepdims=True)
-    emb_matrix = emb_matrix / np.maximum(norms, 1e-12)
+        global_id_order.extend(chunk_ids)
 
     bm25_index = BM25Index(db)
     search = SearchService(embedder, vector_store, db, bm25_index, reranker)
@@ -157,20 +204,12 @@ def run_cell(
     queries = []
     skipped = 0
     for item in testset:
-        if item.get("doc") not in name_to_doc_id:
-            print(f"  警告：测试集引用了语料中不存在的文档 {item['doc']}，跳过", file=sys.stderr)
+        if item.get("doc") not in name_to_doc_id or item["id"] not in qrels_for_config:
             skipped += 1
             continue
-        if not item.get("source_passage"):
-            skipped += 1
-            continue
-        # 段落级 qrels：与答案出处段落相似度达阈值的块都是相关块
-        gold = np.asarray(embedder.embed([item["source_passage"]])[0], dtype=np.float64)
-        gold = gold / (np.linalg.norm(gold) + 1e-12)
-        sims = emb_matrix @ gold
-        relevant = {all_ids[i] for i in np.where(sims >= passage_threshold)[0]}
+        relevant = {global_id_order[i] for i in qrels_for_config[item["id"]]}
         if not relevant:
-            skipped += 1  # 出处段落在该分块配置下被切散，无块达到阈值，跳过该题
+            skipped += 1
             continue
         results = search.search(item["question"], cfg["strategy"], TOP_K, rerank=cfg["rerank"])
         retrieved = list(dict.fromkeys(r["chunk_id"] for r in results))  # 去重保序
@@ -234,6 +273,16 @@ def run_grid(
     overlaps = tuple(sorted({c["overlap"] for c in cells}))
     chunk_cache = prepare_chunk_cache(corpus, embedder, chunk_sizes, overlaps)
 
+    # 段落级 qrels 预计算 + 统一评估子集（跨配置只比同一批查询）
+    qrels = prepare_qrels(chunk_cache, corpus, embedder, testset, passage_threshold)
+    testset = common_queries(qrels, testset)
+    if not testset:
+        raise RuntimeError(
+            f"统一评估子集为空：所有查询在至少一种分块配置下都无相关块，"
+            f"请检查 source_passage 与 passage_threshold（当前 {passage_threshold}）"
+        )
+    print(f"统一评估子集：{len(testset)} 条查询（全部分块配置下均可判定）", flush=True)
+
     # 断点续跑：CSV 中已完成的格子跳过（重跑命令只补缺）
     done_names = {r["name"] for r in load_csv_rows(output_csv)}
 
@@ -244,8 +293,11 @@ def run_grid(
             continue
         print(f"[{cfg['name']}] 运行中 ...", flush=True)
         try:
-            row = run_cell(cfg, embedder, reranker, chunk_cache, testset,
-                           workdir_root / cfg["name"], passage_threshold=passage_threshold)
+            row = run_cell(
+                cfg, embedder, reranker, chunk_cache, testset,
+                qrels[(cfg["chunk_size"], cfg["overlap"])],
+                workdir_root / cfg["name"],
+            )
         except Exception as e:
             # 单格失败不中断整批（限流等瞬时错误），重跑本命令即可续跑
             print(f"[{cfg['name']}] 失败：{e}（重跑本命令可续跑剩余格子）", file=sys.stderr, flush=True)

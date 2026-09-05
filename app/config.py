@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-m3"
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
 
-    # ---- 检索参数（默认值待第 3 周评估实验用数据定稿）----
-    chunk_size: int = 512
-    chunk_overlap: int = 50
+    # ---- 检索参数（默认值来自第 3 周网格实验：chunk768_o0 系列 + 重排最优，见 eval/results/）----
+    chunk_size: int = 768
+    chunk_overlap: int = 0
     top_k: int = 5
     collection_name: str = "docmind"
 

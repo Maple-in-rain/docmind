@@ -5,34 +5,7 @@ import pytest
 from app.retrieval.bm25_index import BM25Index
 from app.services.search_service import SearchService
 from app.storage.db import Database
-from tests.helpers import FakeEmbedder, FakeReranker
-
-
-class FakeVectorStore:
-    """内存向量库：存 embedding，按余弦相似度降序返回，接口同 ChromaVectorStore"""
-
-    def __init__(self):
-        self._data = {}  # chunk_id -> (text, embedding, meta)
-
-    def add(self, ids, texts, embeddings, metadatas):
-        for cid, text, emb, meta in zip(ids, texts, embeddings, metadatas):
-            self._data[cid] = (text, emb, meta)
-
-    def query(self, query_embedding, top_k):
-        def cosine(emb):
-            dot = sum(a * b for a, b in zip(query_embedding, emb))
-            n1 = sum(a * a for a in query_embedding) ** 0.5
-            n2 = sum(b * b for b in emb) ** 0.5
-            return dot / (n1 * n2) if n1 and n2 else 0.0
-
-        ranked = sorted(self._data.items(), key=lambda kv: -cosine(kv[1][1]))
-        return [(cid, text, cosine(emb), meta) for cid, (text, emb, meta) in ranked[:top_k]]
-
-    def delete_by_doc(self, doc_id):
-        self._data = {k: v for k, v in self._data.items() if v[2]["doc_id"] != doc_id}
-
-    def count(self):
-        return len(self._data)
+from tests.helpers import FakeEmbedder, FakeReranker, FakeVectorStore
 
 
 class ExplodingEmbedder(FakeEmbedder):

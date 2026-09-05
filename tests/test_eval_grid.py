@@ -8,7 +8,7 @@
 
 from app.chunking.fixed_chunker import FixedChunker
 
-from eval.evaluate import prepare_chunk_cache, run_cell, run_grid
+from eval.evaluate import prepare_chunk_cache, prepare_qrels, run_cell, run_grid
 from tests.helpers import FakeEmbedder, FakeReranker
 
 MINI_CORPUS = [
@@ -35,12 +35,18 @@ def _mini_testset():
     return testset
 
 
+def _qrels_for(chunk_cache, embedder, testset, threshold=0.99):
+    return prepare_qrels(chunk_cache, MINI_CORPUS, embedder, testset, threshold)
+
+
 def test_run_cell_offline(tmp_path):
     cfg = {"name": "t", "chunk_size": 64, "overlap": 0, "strategy": "hybrid", "rerank": True}
     embedder = FakeEmbedder()
+    testset = _mini_testset()
     chunk_cache = prepare_chunk_cache(MINI_CORPUS, embedder, chunk_sizes=(64,), overlaps=(0,))
-    row = run_cell(cfg, embedder, FakeReranker(), chunk_cache, _mini_testset(),
-                   tmp_path / "work", passage_threshold=0.99)
+    qrels = _qrels_for(chunk_cache, embedder, testset)
+    row = run_cell(cfg, embedder, FakeReranker(), chunk_cache, testset,
+                   qrels[(64, 0)], tmp_path / "work")
 
     assert row["n_queries"] == 2
     assert row["n_skipped"] == 0
@@ -55,8 +61,9 @@ def test_run_cell_skips_unknown_doc(tmp_path):
     cfg = {"name": "t", "chunk_size": 64, "overlap": 0, "strategy": "vector", "rerank": False}
     embedder = FakeEmbedder()
     chunk_cache = prepare_chunk_cache(MINI_CORPUS, embedder, chunk_sizes=(64,), overlaps=(0,))
+    qrels = _qrels_for(chunk_cache, embedder, testset)
     row = run_cell(cfg, embedder, FakeReranker(), chunk_cache, testset,
-                   tmp_path / "work", passage_threshold=0.99)
+                   qrels[(64, 0)], tmp_path / "work")
     assert row["n_queries"] == 2
     assert row["n_skipped"] == 1  # 未知文档的测试项被跳过，不炸
 

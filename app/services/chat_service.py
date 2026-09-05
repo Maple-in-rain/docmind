@@ -3,6 +3,10 @@
 事件流顺序：sources（引用来源，先发给前端展示）→ delta（逐段增量）→ done。
 引用来源在生成前就能拿到，先发给前端可以让引用卡片立即渲染。
 
+检索策略（第 3 周评估定稿）：hybrid + 重排。网格实验（eval/results/）证明
+重排是检索质量的最大单一变量，混合检索在重排下稳定最优；默认参数
+chunk 768 / 无重叠 / hybrid / rerank on 均来自评估数据而非拍脑袋。
+
 Prompt 设计（面试可讲）：
 - 系统提示 + 参考资料放在 messages 最前面——DeepSeek 对稳定前缀做
   上下文缓存，命中后输入成本大幅下降；
@@ -13,9 +17,8 @@ Prompt 设计（面试可讲）：
 import asyncio
 from collections.abc import AsyncIterator
 
-from ..embeddings.base import EmbeddingProvider
 from ..llm.base import LLMProvider
-from ..retrieval.vector_store import VectorStore
+from .search_service import SearchService
 
 # 上下文预算：单片段最长字符数 / 全部片段总预算（中文按字符近似）
 _CHUNK_MAX_CHARS = 600
@@ -32,9 +35,8 @@ _SYSTEM_PROMPT = (
 
 
 class ChatService:
-    def __init__(self, embedder: EmbeddingProvider, vector_store: VectorStore, llm: LLMProvider):
-        self.embedder = embedder
-        self.vector_store = vector_store
+    def __init__(self, search_service: SearchService, llm: LLMProvider):
+        self.search_service = search_service
         self.llm = llm
 
     async def chat(self, messages: list[dict], top_k: int = 5) -> tuple[str, list[dict]]:
@@ -54,24 +56,27 @@ class ChatService:
         history = messages[:-1]
 
         # 知识库为空：直接提示，不发请求
-        if self.vector_store.count() == 0:
+        if self.search_service.vector_store.count() == 0:
             yield {"type": "delta", "content": "知识库还是空的，请先在左侧上传文档。"}
             yield {"type": "done"}
             return
 
-        # 1. 检索（embedding 是同步 HTTP 调用，放进线程池避免阻塞事件循环）
-        query_embedding = (await asyncio.to_thread(self.embedder.embed, [question]))[0]
-        results = await asyncio.to_thread(self.vector_store.query, query_embedding, top_k)
+        # 1. 检索：hybrid + 重排（评估定稿的默认策略）；
+        #    内部是同步 HTTP 调用，放进线程池避免阻塞事件循环
+        results = await asyncio.to_thread(
+            self.search_service.search, question, "hybrid", top_k, True
+        )
 
         sources = [
             {
-                "text": text,
-                "doc_id": meta["doc_id"],
-                "seq": meta.get("seq"),
-                "title": meta.get("title", ""),
-                "score": round(score, 4) if score is not None else None,
+                "text": r["text"],
+                "doc_id": r["doc_id"],
+                "seq": r["seq"],
+                "title": r["title"],
+                # 展示相关度优先用重排分（cross-encoder 与查询的真实相关性）
+                "score": round(r["rerank_score"], 4) if r["rerank_score"] is not None else r["score"],
             }
-            for _chunk_id, text, score, meta in results
+            for r in results
         ]
 
         # 2. prompt 拼装：系统提示+资料（稳定前缀）→ 历史 → 问题
