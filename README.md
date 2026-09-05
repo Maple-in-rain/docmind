@@ -42,8 +42,8 @@ pip install -r requirements.txt
 # 3. 配置 API key
 cp .env.example .env
 # 编辑 .env，填入 DEEPSEEK_API_KEY 和 SILICONFLOW_API_KEY
-# DeepSeek:  https://platform.deepseek.com（充值几元即可）
-# 硅基流动:  https://siliconflow.cn（免费额度）
+# DeepSeek:  https://platform.deepseek.com
+# 硅基流动:  https://siliconflow.cn
 
 # 4. 启动
 uvicorn app.main:app --reload
