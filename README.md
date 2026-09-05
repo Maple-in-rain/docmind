@@ -9,11 +9,13 @@
 - [x] 文档上传与解析：PDF / Word / Markdown / TXT（含 GBK 编码自动探测）
 - [x] 固定窗口分块（token 估算）+ 块间重叠
 - [x] 向量化入库（Chroma + bge-m3 embedding）
-- [x] 检索调试端点（`/api/search`）
+- [x] 检索调试端点（`/api/search`，vector / bm25 / hybrid 三策略）
+- [x] 混合检索：BM25（jieba + rank-bm25，随文档增删同步重建）+ 向量 + RRF 融合
+- [x] 自写 `MyBM25` 与 rank-bm25 逐分对拍（误差 < 1e-6，见 `tests/test_bm25.py`）
 - [x] 流式问答（SSE）+ 多轮对话 + 引用溯源
 - [x] 聊天前端：手写 HTML/CSS/JS 单页（书斋主题，零框架零构建）
-- [ ] 混合检索：BM25 + 向量 + RRF 融合 + 重排（第 3 周）
-- [ ] 检索质量评估体系 + 压测报告（第 3-4 周）
+- [ ] 重排 + 检索质量评估体系（第 3 周）
+- [ ] 压测报告（第 4 周）
 - [ ] 云服务器部署上线（第 4 周）
 
 ## 技术栈
@@ -23,6 +25,8 @@
 | 后端 | Python 3.12 + FastAPI + Pydantic v2 |
 | 向量库 | Chroma（单机嵌入式，持久化落盘） |
 | Embedding | 硅基流动 BAAI/bge-m3（1024 维，免费额度） |
+| 关键词检索 | BM25（jieba 分词 + rank-bm25，SQLite 全量重建，自写 `MyBM25` 对拍验证） |
+| 混合融合 | RRF 倒数排名融合（k=60） |
 | 大模型 | DeepSeek（OpenAI 兼容，httpx 手写 SSE 流式客户端） |
 | 文档解析 | PyMuPDF / python-docx / charset-normalizer |
 | 元数据 | SQLite（标准库） |
@@ -65,8 +69,11 @@ flowchart LR
 
     G[用户提问] --> H[查询向量化]
     H --> I[向量检索 top-k]
-    I --> J[Prompt 拼装<br>系统提示+片段+历史]
+    F --> M[BM25 关键词检索<br>jieba + rank-bm25]
+    I --> N[RRF 混合融合<br>k=60]
+    M --> N
     E --> I
+    N --> J[Prompt 拼装<br>系统提示+片段+历史]
     J --> K[DeepSeek<br>SSE 流式]
     K --> L[前端流式渲染<br>答案+引用卡片]
 ```
@@ -102,8 +109,9 @@ app/
 
 ## Roadmap
 
-- [ ] 混合检索（BM25 + 向量 + RRF）+ 重排
+- [ ] 重排（bge-reranker-v2-m3，可开关）
 - [ ] 检索质量评估体系（测试集 + recall@k/MRR + 网格实验）
+- [ ] BM25 索引磁盘序列化 / 增量合并（当前为 SQLite 全量重建，<100 文档毫秒级）
 - [ ] Markdown 标题结构化分块
 - [ ] 大文件异步入库（任务队列）
 - [ ] 扫描版 PDF OCR

@@ -41,9 +41,9 @@ class SearchResult(BaseModel):
     doc_id: int
     seq: int | None = None
     title: str = ""
-    score: float | None = None          # 向量余弦相似度
-    rank_vector: int | None = None      # 向量路排名
-    rank_bm25: int | None = None        # BM25 路排名（第 3 周起有值）
+    score: float | None = None          # 检索分数：vector=余弦相似度 / bm25=BM25 分 / hybrid=RRF 分
+    rank_vector: int | None = None      # 向量路排名（未参与该路的策略为 None）
+    rank_bm25: int | None = None        # BM25 路排名（未参与该路的策略为 None）
 
 
 # ---- 聊天（第 2 周启用）----

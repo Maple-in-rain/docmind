@@ -9,6 +9,7 @@ from pathlib import Path
 from ..chunking.base import BaseChunker
 from ..embeddings.base import EmbeddingProvider
 from ..parsers.registry import get_parser
+from ..retrieval.bm25_index import BM25Index
 from ..retrieval.vector_store import VectorStore
 from ..storage.db import Database
 from ..storage.file_store import FileStore
@@ -22,12 +23,14 @@ class IngestionService:
         embedder: EmbeddingProvider,
         vector_store: VectorStore,
         db: Database,
+        bm25_index: BM25Index,
     ):
         self.file_store = file_store
         self.chunker = chunker
         self.embedder = embedder
         self.vector_store = vector_store
         self.db = db
+        self.bm25_index = bm25_index
 
     def ingest(self, content: bytes, filename: str, title: str = "") -> dict:
         stored_name, _ = self.file_store.save(content, filename)
@@ -57,6 +60,7 @@ class IngestionService:
                 embeddings=embeddings,
                 metadatas=[{"doc_id": doc_id, "seq": i, "title": doc_title} for i in range(len(chunks))],
             )
+            self.bm25_index.rebuild()  # 双路存储同步：新增分块进 BM25 索引
             return {"doc_id": doc_id, "title": doc_title, "chunk_count": len(chunks)}
         except Exception:
             self.file_store.delete(stored_name)  # 失败清理落盘文件
@@ -69,3 +73,4 @@ class IngestionService:
         self.vector_store.delete_by_doc(doc_id)  # 先删向量，再删元数据（级联删分块）
         self.db.delete_document(doc_id)
         self.file_store.delete(doc["stored_name"])
+        self.bm25_index.rebuild()  # 双路存储同步：删除文档后重建关键词索引

@@ -8,6 +8,7 @@ from ..chunking.fixed_chunker import FixedChunker
 from ..config import settings
 from ..embeddings.siliconflow_provider import SiliconFlowEmbeddingProvider
 from ..llm.deepseek_provider import DeepSeekProvider
+from ..retrieval.bm25_index import BM25Index
 from ..retrieval.vector_store import ChromaVectorStore
 from ..storage.db import Database
 from ..storage.file_store import FileStore
@@ -24,6 +25,7 @@ def build_services() -> dict:
     db = Database()
     file_store = FileStore()
     chunker = FixedChunker(settings.chunk_size, settings.chunk_overlap)
+    bm25_index = BM25Index(db)  # 构造即从 SQLite 全量重建（启动时恢复关键词索引）
     llm = DeepSeekProvider()
 
     return {
@@ -32,8 +34,9 @@ def build_services() -> dict:
         "db": db,
         "file_store": file_store,
         "chunker": chunker,
+        "bm25_index": bm25_index,
         "llm": llm,
-        "ingestion": IngestionService(file_store, chunker, embedder, vector_store, db),
-        "search": SearchService(embedder, vector_store, db),
+        "ingestion": IngestionService(file_store, chunker, embedder, vector_store, db, bm25_index),
+        "search": SearchService(embedder, vector_store, db, bm25_index),
         "chat": ChatService(embedder, vector_store, llm),
     }

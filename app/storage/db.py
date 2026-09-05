@@ -93,3 +93,25 @@ class Database:
                 "SELECT * FROM chunks WHERE doc_id = ? ORDER BY seq", (doc_id,)
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def get_all_chunks(self) -> list[dict]:
+        """全量分块列表（BM25 索引重建用）"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT chunk_id, doc_id, seq, text FROM chunks ORDER BY doc_id, seq"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_chunks_by_ids(self, chunk_ids: list[str]) -> list[dict]:
+        """按 id 批量取分块，JOIN documents 带上标题（检索结果组装用）"""
+        if not chunk_ids:
+            return []
+        with self._conn() as conn:
+            placeholders = ",".join("?" * len(chunk_ids))
+            rows = conn.execute(
+                f"SELECT c.chunk_id, c.doc_id, c.seq, c.text, d.title "
+                f"FROM chunks c JOIN documents d ON c.doc_id = d.doc_id "
+                f"WHERE c.chunk_id IN ({placeholders})",
+                chunk_ids,
+            ).fetchall()
+            return [dict(r) for r in rows]
