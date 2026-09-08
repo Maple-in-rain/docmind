@@ -3,6 +3,8 @@
 上传文档，问它问题——支持多格式文档（PDF / Word / Markdown / TXT）的知识库问答系统。基于 RAG（检索增强生成）架构：先把文档切块向量化入库，提问时检索最相关的片段，交给大模型结合上下文生成答案，并给出引用来源。
 
 > 核心亮点：**数据驱动的检索质量工程** —— 可插拔的分块/检索策略 + 自建评估体系（recall@k / MRR）+ 压测报告，用数据证明"混合检索为什么更好"。
+>
+> **在线演示**：http://42.192.115.149/（腾讯云学生机 2C2G，1 元级成本）
 
 ## 功能特性
 
@@ -13,7 +15,7 @@
 - [x] 混合检索：BM25（jieba + rank-bm25，随文档增删同步重建）+ 向量 + RRF 融合
 - [x] 自写 `MyBM25` 与 rank-bm25 逐分对拍（误差 < 1e-6，见 `tests/test_bm25.py`）
 - [x] 重排：bge-reranker-v2-m3 精排候选集（可开关，"宽召回 + 精排序"）
-- [x] 检索质量评估：LLM 反向生成测试集（90 条 QA）+ 手写 recall@k / MRR + 36 格网格实验
+- [x] 检索质量评估：LLM 反向生成测试集（84 条 QA，人工抽查）+ 手写 recall@k / MRR + 36 格网格实验
 - [x] 前端「检索台」调试面板：三策略并排对比、两路排名徽章互参
 - [x] 流式问答（SSE）+ 多轮对话 + 引用溯源
 - [x] 聊天前端：手写 HTML/CSS/JS 单页（书斋主题，零框架零构建）
@@ -36,7 +38,7 @@
 | 文档解析 | PyMuPDF / python-docx / charset-normalizer |
 | 元数据 | SQLite（标准库） |
 | 前端 | 原生 HTML / CSS / JS（单页，无框架） |
-| 测试/压测 | pytest（90+ 用例，全离线）/ locust（两场景报告 + 分段计时定位瓶颈） |
+| 测试/压测 | pytest（100+ 用例，全离线）/ locust（两场景报告 + 分段计时定位瓶颈） |
 
 ## 快速开始
 
@@ -78,7 +80,8 @@ flowchart LR
     I --> N[RRF 混合融合<br>k=60]
     M --> N
     E --> I
-    N --> J[Prompt 拼装<br>系统提示+片段+历史]
+    N --> O[重排 bge-reranker<br>宽召回+精排序]
+    O --> J[Prompt 拼装<br>系统提示+片段+历史]
     J --> K[DeepSeek<br>SSE 流式]
     K --> L[前端流式渲染<br>答案+引用卡片]
 ```
@@ -142,7 +145,7 @@ python -X utf8 -m eval.evaluate          # 全量网格（断点续跑，只补�
 
 ## 性能压测（locust，两场景）
 
-**口径**：15 篇语料灌库（26 个 chunk，`loadtest/seed_docs.py`）；查询池 = 评估测试集 84 条真实问题；每场景 180 秒，报告为 P50/P95/P99（本机 8 核 Windows，实测值）。
+**口径**：15 篇语料灌库（26 个 chunk，`loadtest/seed_docs.py`）；查询池 = 评估测试集 84 条真实问题；每场景 180 秒，报告为 P50/P95/P99（本机 Windows 20 逻辑核，实测值）。
 
 | 场景 | 目的 | provider | 并发 |
 |------|------|----------|------|
@@ -181,7 +184,7 @@ python -X utf8 -m eval.evaluate          # 全量网格（断点续跑，只补�
 python -X utf8 loadtest/seed_docs.py --base http://127.0.0.1:8000
 # 场景 1：真实 provider 低并发
 python -X utf8 -m locust -f loadtest/locustfile.py --host http://127.0.0.1:8000 \
-  --headless -u 3 -r 1 -t 300s --csv=locust_report_scenario1 --html=locust_report_scenario1.html
+  --headless -u 3 -r 1 -t 180s --csv=locust_report_scenario1 --html=locust_report_scenario1.html
 # 场景 2：全 mock 高并发（服务器用三个 PROVIDER=mock 环境变量启动）
 DOCMIND_WAIT_MIN=0 DOCMIND_WAIT_MAX=0.1 python -X utf8 -m locust -f loadtest/locustfile.py \
   --host http://127.0.0.1:8000 --headless -u 50 -r 10 -t 180s --csv=locust_report_scenario2 --html=locust_report_scenario2.html
@@ -190,8 +193,8 @@ DOCMIND_WAIT_MIN=0 DOCMIND_WAIT_MAX=0.1 python -X utf8 -m locust -f loadtest/loc
 
 ## 部署指南（学生机 2C2G，约 100 元/年）
 
-1. 购买：阿里云「云翼计划」或腾讯云「云+校园」，学生认证后选 2 核 2G、Ubuntu 22.04/24.04
-2. 云控制台安全组放行 80 端口
+1. 购买：阿里云「云工开物」（原云翼计划）或腾讯云「云+校园」，学生认证后选轻量服务器 2 核 2G、Ubuntu 22.04/24.04（本项目已部署在腾讯云轻量，见顶部在线演示）
+2. 云控制台放行 80 端口（轻量服务器叫「防火墙」，ECS 叫「安全组」）
 3. 登录服务器执行：
 
 ```bash
@@ -199,9 +202,10 @@ git clone https://github.com/Maple-in-rain/docmind.git   # 不稳时用 gitee �
 bash docmind/deploy/setup_server.sh                      # 脚本中途会暂停，等你在 .env 填 API key
 ```
 
+   clone 不通的备选：本机 `git archive --format=tar.gz -o docmind-deploy.tar.gz HEAD` 打包 → `scp` 上传 → 解压到 `~/docmind` 后跑同一脚本（脚本自动跳过 clone）。
 4. 打开 `http://<公网IP>/`；流式输出验证：`curl -N -X POST http://<IP>/api/chat -H "Content-Type: application/json" -d '{"messages":[{"role":"user","content":"你好"}]}'` 应逐帧返回
 
-架构：nginx（80 反向代理，`proxy_buffering off` 保证 SSE 逐字流式）→ uvicorn（127.0.0.1:8000，systemd 守护）→ 嵌入式 Chroma + SQLite（无需额外数据库服务）。常见排查：`journalctl -u docmind -f`、`sudo nginx -t`。**服务器上同样不要提交 .env**（已在 .gitignore）。
+架构：nginx（80 反向代理，`proxy_buffering off` 保证 SSE 逐字流式）→ uvicorn（127.0.0.1:8000，systemd 守护）→ 嵌入式 Chroma + SQLite（无需额外数据库服务）。常见排查：`journalctl -u docmind -f`、`sudo nginx -t`。**服务器上同样不要提交 .env**（已在 .gitignore）。国内服务器用 IP 直访无需域名备案。
 
 ## API 摘要
 
@@ -234,7 +238,7 @@ eval/
 ├── metrics.py          # 手写 recall@k / MRR@k（含单测）
 ├── evaluate.py         # 网格实验：分块×重叠×策略×重排，一键复现
 ├── testset_builder.py  # DeepSeek 反向生成测试集
-└── data/               # 语料（15 篇技术文档）+ 测试集（90 条 QA）+ 抽查记录
+└── data/               # 语料（15 篇技术文档）+ 测试集（84 条 QA）+ 抽查记录
 
 loadtest/
 ├── locustfile.py       # 压测任务（查询池与评估同源，含首 token 自定义事件）

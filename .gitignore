@@ -20,3 +20,6 @@ locust_report*
 # IDE
 .idea/
 .vscode/
+
+# 部署打包产物（git archive 临时文件）
+*.tar.gz
