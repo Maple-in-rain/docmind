@@ -4,7 +4,7 @@
 
 > 核心亮点：**数据驱动的检索质量工程** —— 可插拔的分块/检索策略 + 自建评估体系（recall@k / MRR）+ 压测报告，用数据证明"混合检索为什么更好"。
 >
-> **在线演示**：http://42.192.115.149/（腾讯云学生机 2C2G，1 元级成本）
+> **在线演示**：http://42.192.115.149/
 
 ## 功能特性
 
@@ -29,7 +29,7 @@
 |------|------|
 | 后端 | Python 3.12 + FastAPI + Pydantic v2 |
 | 向量库 | Chroma（单机嵌入式，持久化落盘） |
-| Embedding | 硅基流动 BAAI/bge-m3（1024 维，免费额度） |
+| Embedding | 硅基流动 BAAI/bge-m3 |
 | 关键词检索 | BM25（jieba 分词 + rank-bm25，SQLite 全量重建，自写 `MyBM25` 对拍验证） |
 | 混合融合 | RRF 倒数排名融合（k=60） |
 | 重排 | BAAI/bge-reranker-v2-m3（cross-encoder 精排候选集，可开关） |
@@ -170,7 +170,7 @@ python -X utf8 -m eval.evaluate          # 全量网格（断点续跑，只补�
 | rerank（cross-encoder） | 330~400 ms | 外部 API |
 | llm_first_token / llm_total | ~550 / ~1330 ms | 外部 LLM |
 
-**结论**（面试话术）：
+**结论**：
 
 1. **延迟大头全在外部 API**：embed + rerank + LLM 首 token 占端到端 ~95%，本地组件（Chroma / SQLite / BM25 / RRF）全部 ≤2ms——检索架构本身没有性能债；
 2. **系统自身吞吐足够**：全 mock 50 并发零思考时间，6.4 万请求 0 失败，search 143 rps / chat 71 rps；场景 2 的 P50 主要来自高并发排队（FastAPI 同步端点线程池 40 + `to_thread` 默认线程池），而非计算；
@@ -191,21 +191,7 @@ DOCMIND_WAIT_MIN=0 DOCMIND_WAIT_MAX=0.1 python -X utf8 -m locust -f loadtest/loc
 # 定位瓶颈：PERF_LOG=1 启动服务后发请求，日志输出每段耗时
 ```
 
-## 部署指南（学生机 2C2G，约 100 元/年）
 
-1. 购买：阿里云「云工开物」（原云翼计划）或腾讯云「云+校园」，学生认证后选轻量服务器 2 核 2G、Ubuntu 22.04/24.04（本项目已部署在腾讯云轻量，见顶部在线演示）
-2. 云控制台放行 80 端口（轻量服务器叫「防火墙」，ECS 叫「安全组」）
-3. 登录服务器执行：
-
-```bash
-git clone https://github.com/Maple-in-rain/docmind.git   # 不稳时用 gitee 镜像或 ghproxy 加速
-bash docmind/deploy/setup_server.sh                      # 脚本中途会暂停，等你在 .env 填 API key
-```
-
-   clone 不通的备选：本机 `git archive --format=tar.gz -o docmind-deploy.tar.gz HEAD` 打包 → `scp` 上传 → 解压到 `~/docmind` 后跑同一脚本（脚本自动跳过 clone）。
-4. 打开 `http://<公网IP>/`；流式输出验证：`curl -N -X POST http://<IP>/api/chat -H "Content-Type: application/json" -d '{"messages":[{"role":"user","content":"你好"}]}'` 应逐帧返回
-
-架构：nginx（80 反向代理，`proxy_buffering off` 保证 SSE 逐字流式）→ uvicorn（127.0.0.1:8000，systemd 守护）→ 嵌入式 Chroma + SQLite（无需额外数据库服务）。常见排查：`journalctl -u docmind -f`、`sudo nginx -t`。**服务器上同样不要提交 .env**（已在 .gitignore）。国内服务器用 IP 直访无需域名备案。
 
 ## API 摘要
 
@@ -254,8 +240,8 @@ deploy/
 
 ## Roadmap
 
-- [x] 聊天链路启用重排/混合检索（默认参数来自第 3 周网格实验数据）
-- [x] 压测体系 + 分段计时 + 部署工件（第 4 周）
+- [x] 聊天链路启用重排/混合检索
+- [x] 压测体系 + 分段计时 + 部署工件
 - [ ] BM25 索引磁盘序列化 / 增量合并（当前为 SQLite 全量重建，<100 文档毫秒级）
 - [ ] Markdown 标题结构化分块
 - [ ] 大文件异步入库（任务队列）
