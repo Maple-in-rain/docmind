@@ -39,5 +39,12 @@ class Settings(BaseSettings):
     # ---- 上传 ----
     max_upload_mb: int = 20
 
+    # ---- 压测 / 性能调试 ----
+    # provider 开关：值为 "mock" 时切换到离线实现（压测场景 2 测系统自身吞吐，不烧 API 额度）
+    llm_provider: str = "deepseek"  # deepseek | mock
+    embedding_provider: str = "siliconflow"  # siliconflow | mock
+    rerank_provider: str = "siliconflow"  # siliconflow | mock
+    perf_log: bool = False  # PERF_LOG=1 开启分段计时日志（定位延迟瓶颈）
+
 
 settings = Settings()

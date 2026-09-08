@@ -12,7 +12,9 @@
   检索调试面板据此可视化"混合检索/重排为什么更好"。
 """
 
+from ..config import settings
 from ..embeddings.base import EmbeddingProvider
+from ..perf import SegmentTimer, logger
 from ..reranking.base import RerankerProvider
 from ..retrieval.bm25_index import BM25Index
 from ..retrieval.hybrid import rrf_fuse
@@ -48,15 +50,20 @@ class SearchService:
         vector_hits: list[tuple[str, float]] = []
         bm25_hits: list[tuple[str, float]] = []
 
+        pt = SegmentTimer(settings.perf_log)  # 默认关闭：每个 segment 仅一次布尔判断
+
         # 两路检索只在需要时计算
         if strategy in ("vector", "hybrid"):
             query_embedding = self.embedder.embed([query])[0]
+            pt.segment("embed")  # 外部 API：查询向量化
             vector_hits = [
                 (chunk_id, score)
                 for chunk_id, _text, score, _meta in self.vector_store.query(query_embedding, candidate_k)
             ]
+            pt.segment("vector_query")  # Chroma 本地检索
         if strategy in ("bm25", "hybrid"):
             bm25_hits = self.bm25_index.search(query, candidate_k)
+            pt.segment("bm25")  # jieba 分词 + BM25 本地打分
 
         if strategy == "vector":
             merged = vector_hits
@@ -72,6 +79,7 @@ class SearchService:
         rank_bm25 = {cid: i for i, (cid, _s) in enumerate(bm25_hits, start=1)}
 
         chunks = {c["chunk_id"]: c for c in self.db.get_chunks_by_ids([cid for cid, _s in merged])}
+        pt.segment("db_fetch")  # SQLite 回填正文
         merged = [(cid, s) for cid, s in merged if cid in chunks]  # 防御：陈旧索引残留丢弃
 
         # 精排：候选池文本送 cross-encoder，按下标重排并截断
@@ -82,8 +90,15 @@ class SearchService:
                 [chunks[cid]["text"] for cid, _s in merged],
                 top_n=top_k,
             )
+            pt.segment("rerank")  # 外部 API：cross-encoder 精排
             rerank_scores = {merged[i][0]: score for i, score in ranked}
             merged = [(merged[i][0], merged[i][1]) for i, _score in ranked]
+
+        if settings.perf_log:
+            logger.info(
+                "search 分段耗时 [%.24s...] strategy=%s top_k=%d rerank=%s %s",
+                query, strategy, top_k, rerank, pt.summary_ms(),
+            )
 
         return [
             {

@@ -17,7 +17,9 @@ Prompt 设计（面试可讲）：
 import asyncio
 from collections.abc import AsyncIterator
 
+from ..config import settings
 from ..llm.base import LLMProvider
+from ..perf import SegmentTimer, logger
 from .search_service import SearchService
 
 # 上下文预算：单片段最长字符数 / 全部片段总预算（中文按字符近似）
@@ -63,9 +65,11 @@ class ChatService:
 
         # 1. 检索：hybrid + 重排（评估定稿的默认策略）；
         #    内部是同步 HTTP 调用，放进线程池避免阻塞事件循环
+        pt = SegmentTimer(settings.perf_log)
         results = await asyncio.to_thread(
             self.search_service.search, question, "hybrid", top_k, True
         )
+        pt.segment("retrieval")  # 含 embed/vector/bm25/db_fetch/rerank 全部
 
         sources = [
             {
@@ -87,8 +91,15 @@ class ChatService:
 
         # 3. 先发来源，再流式输出回答
         yield {"type": "sources", "sources": sources}
+        first_delta = True
         async for delta in self.llm.chat_stream(llm_messages):
+            if first_delta:
+                pt.segment("llm_first_token")  # 首 token 延迟：网络 + LLM 排队
+                first_delta = False
             yield {"type": "delta", "content": delta}
+        pt.segment("llm_total")  # LLM 全量生成（含首 token 前的等待）
+        if settings.perf_log:
+            logger.info("chat 分段耗时 [%.24s...] %s", question, pt.summary_ms())
         yield {"type": "done"}
 
     @staticmethod

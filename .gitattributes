@@ -4,3 +4,8 @@
 # 数据文件统一 LF（jsonl/csv 在 Windows 与 Linux 间流转，避免 CRLF 噪音）
 *.jsonl text eol=lf
 *.csv text eol=lf
+
+# 部署工件必须 LF（CRLF 的 shell/systemd/nginx 配置在 Ubuntu 上会报错）
+*.sh text eol=lf
+*.service text eol=lf
+*.conf text eol=lf

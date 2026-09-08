@@ -1,0 +1,20 @@
+[Unit]
+Description=DocMind RAG 知识库问答服务
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+# pydantic-settings 从 cwd 读 .env —— WorkingDirectory 必须指向项目根
+WorkingDirectory=/home/ubuntu/docmind
+ExecStart=/home/ubuntu/miniconda3/envs/docmind/bin/python -X utf8 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
+Restart=on-failure
+RestartSec=3
+# 2C2G 资源约束：封顶内存防 OOM 拖垮整机；只监听 127.0.0.1，由 nginx 对外
+MemoryMax=1536M
+Environment=PYTHONUNBUFFERED=1
+Environment=ANONYMIZED_TELEMETRY=False
+
+[Install]
+WantedBy=multi-user.target
