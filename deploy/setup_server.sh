@@ -12,6 +12,9 @@ CONDA_DIR="$HOME/miniconda3"
 #   2) 加速代理：https://ghproxy.com/https://github.com/Maple-in-rain/docmind.git
 GIT_REPO="https://github.com/Maple-in-rain/docmind.git"
 
+echo "==> [0/5] 缓存 sudo 凭据（本脚本内不再重复询问密码）"
+sudo -v
+
 echo "==> [1/5] 基础依赖"
 sudo apt-get update -y && sudo apt-get install -y git curl wget unzip
 
@@ -22,12 +25,23 @@ if [ ! -d "$CONDA_DIR" ]; then
 fi
 source "$CONDA_DIR/etc/profile.d/conda.sh"
 
-echo "==> [3/5] conda 环境 + 代码 + 依赖（pip 清华镜像）"
+echo "==> [3/5] conda 环境 + 代码 + 依赖（conda/pip 均清华镜像）"
+# conda 默认源在境内极慢，写入清华镜像配置
+cat > "$HOME/.condarc" <<'EOF'
+channels:
+  - defaults
+show_channel_urls: true
+default_channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+custom_channels:
+  conda-forge: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+EOF
 conda create -n docmind python=3.12 -y
 conda activate docmind
-if [ ! -d "$PROJECT_DIR/.git" ]; then
+# 代码来源二选一：本机打包上传的目录（无 .git）直接用；否则 clone GitHub
+if [ ! -d "$PROJECT_DIR" ]; then
   git clone "$GIT_REPO" "$PROJECT_DIR"
-else
+elif [ -d "$PROJECT_DIR/.git" ]; then
   cd "$PROJECT_DIR" && git pull --ff-only || true
 fi
 cd "$PROJECT_DIR"
