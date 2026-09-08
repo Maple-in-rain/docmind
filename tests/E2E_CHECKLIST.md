@@ -39,5 +39,5 @@ uvicorn app.main:app --reload
 ## 第 4 周：部署 + 压测
 
 - [x] locust 压测报告含 P50/P95/P99（场景 1/2 实测数字已进 README「性能压测」章节；复现命令见该章节）
-- [ ] 公网 IP 访问完整流程，流式输出正常（nginx `proxy_buffering off` 生效）——待学生机购买后执行
+- [x] 公网 IP 访问完整流程，流式输出正常（2026-09-09 腾讯云轻量 42.192.115.149：上传→检索→SSE 逐帧验证 87 帧陆续到达，nginx `proxy_buffering off` 生效）
 - [ ] README 全部链接（demo、架构图、报告）可访问
