@@ -1,29 +1,102 @@
-# DocMind — 基于 RAG 的 AI 知识库问答系统
+# DocMind — RAG 文档问答与技术方案分析 Agent
 
-上传文档，问它问题——支持多格式文档（PDF / Word / Markdown / TXT）的知识库问答系统。基于 RAG（检索增强生成）架构：先把文档切块向量化入库，提问时检索最相关的片段，交给大模型结合上下文生成答案，并给出引用来源。
+上传 PDF、Word、Markdown 或 TXT，在同一个知识库中完成两类任务：**检索问答**与**技术方案对比**。普通问题使用固定 RAG 流程；需要多次查找的分析任务使用单 Agent，由模型根据工具结果决定下一步操作。
 
-> 核心亮点：**数据驱动的检索质量工程** —— 可插拔的分块/检索策略 + 自建评估体系（recall@k / MRR）+ 压测报告，比较不同检索配置的效果与限制；新增可观察的技术方案对比 Agent。
->
-> **在线演示**：http://42.192.115.149/
+[在线演示](http://42.192.115.149/) · [演示与使用说明](docs/upgrade-demo.md) · [验收与上线记录](docs/deployment-2026-11-10.md)
 
-## 功能特性
+## 两种使用模式
 
-- [x] 文档上传与解析：PDF / Word / Markdown / TXT（含 GBK 编码自动探测）
-- [x] 固定窗口分块（token 估算）+ 块间重叠
-- [x] 向量化入库（Chroma + bge-m3 embedding）
-- [x] 检索调试端点（`/api/search`，vector / bm25 / hybrid 三策略）
-- [x] 混合检索：BM25（jieba + rank-bm25，随文档增删同步重建）+ 向量 + RRF 融合
-- [x] 自写 `MyBM25` 与 rank-bm25 逐分对拍（误差 < 1e-6，见 `tests/test_bm25.py`）
-- [x] 重排：bge-reranker-v2-m3 精排候选集（可开关，"宽召回 + 精排序"）
-- [x] 检索质量评估：LLM 反向生成测试集（84 条 QA，人工抽查）+ 手写 recall@k / MRR + 36 格网格实验
-- [x] 前端「检索台」调试面板：三策略并排对比、两路排名徽章互参
-- [x] 流式问答（SSE）+ 多轮问题补全（异常回退、可关闭）+ 实际上下文片段引用
-- [x] 技术方案对比 Agent：模型驱动工具调用、请求内任务状态、证据编号、调用预算与终止记录
-- [x] 方案分析模式、查找记录与 Markdown 报告复制（使用说明见 `docs/upgrade-demo.md`）
-- [x] 聊天前端：手写 HTML/CSS/JS 单页（书斋主题，零框架零构建）
-- [x] provider 可切换（mock 离线压测）+ 分段计时诊断（PERF_LOG）
-- [x] 压测报告（locust，含 P50/P95/P99，两场景）
-- [x] 部署工件（systemd + nginx 一键脚本，SSE 流式代理配置）
+| 模式 | 示例任务 | 工作方式与结果 |
+|------|----------|----------------|
+| 普通问答 · RAG | “缓存穿透如何处理？”接着追问“那另一种情况呢？” | 结合近期对话补全检索问题，混合检索与重排后流式回答，附实际传入模型的来源片段 |
+| 方案分析 · Agent | “比较三份缓存方案的一致性、故障恢复和运维成本，列出依据与待确认问题。” | 制定比较维度，自主选择搜索或读取上下文，更新任务进度，输出带引用的 Markdown 报告 |
+
+前端可直接切换模式。Agent 模式展示任务清单、查找记录、停止状态，并支持复制报告；普通问答保留逐段流式输出。在线知识库内容可能变化，固定示例可用下文的本地演示文档复现。
+
+## 本次升级
+
+### 完善 RAG：追问与证据对应
+
+- **追问补全**：把“那怎么解决？”结合近期对话补全为可检索的问题。单轮问题跳过；5 秒超时、异常或不合法输出回退原问题。可通过 `QUERY_REWRITE_ENABLED=false` 关闭。
+- **实际上下文引用**：先裁剪片段，再将同一份文本用于生成和来源卡片，保留文档与片段编号，避免展示的证据与模型看到的内容不同。
+- **资料不足时说明缺口**：没有检索结果时直接提示；有片段但缺少回答依据时要求说明资料不足，不擅自补充数据或优劣排名。模型仍可能判断错误，需要核对原文。
+- **保留检索对照能力**：vector、BM25、RRF 混合检索、可选重排和三策略并排检索台；自写 BM25 与现成库逐分对拍。
+
+### 增加 Agent：根据查找结果继续完成任务
+
+Agent 的核心是工具调用循环：模型提出工具调用，服务端校验并执行，把结果交回模型；模型据此继续查找或交付报告。执行路径不固定为一次搜索后生成。
+
+| 工具 | 职责 |
+|------|------|
+| `list_documents` | 分页查看文档编号与标题，每页最多 20 条 |
+| `search_documents` | 复用混合检索与重排，每次最多返回 5 个证据片段 |
+| `read_context` | 读取指定片段及相邻内容，每次最多 3 个片段 |
+| `update_task` | 更新本次任务的步骤、完成项和证据缺口；使用整数步骤编号，服务端映射为显示文本 |
+
+任务状态与证据只保留在本次请求内，每个请求独立创建。工具仅访问现有知识库或更新请求内状态，不修改用户文档。
+
+执行上限为 **6 次工具调用、8 次模型回复、90 秒**。重复调用、无效参数和异常均明确反馈；刚好用完工具预算后，允许在剩余时间与轮数内总结已有证据。引用编号检查只验证来源是否存在，不能证明结论一定正确。
+
+## 架构与执行流程
+
+文档入库：解析多格式文件，分块后写入 SQLite 元数据、Chroma 向量库，并同步 BM25 索引。两种模式复用这些检索与正文读取能力。
+
+```mermaid
+flowchart TD
+    U[用户选择任务模式]
+    U --> R[普通问答 /api/chat]
+    R --> Q[按需补全追问]
+    Q --> S[混合检索与重排]
+    S --> C[裁剪并编号实际上下文]
+    C --> G[生成带引用的流式回答]
+
+    U --> A[方案分析 /api/agent]
+    A --> M[模型决定下一步]
+    M --> T[工具校验与执行]
+    T --> D[文档列表 / 搜索 / 上下文 / 任务状态]
+    D --> O[返回工具结果]
+    O --> M
+    M --> F[生成对比报告与待确认事项]
+    T --> B[调用次数、轮数、耗时与重复调用检查]
+    B --> E[达到限制时明确停止]
+```
+
+Agent 通过 SSE 推送任务与工具事件，报告在分析结束后输出；当前不提供报告逐 token 生成。
+
+## 如何演示
+
+1. 按快速开始启动，在本地上传 [`scripts/sample_data/comparison/`](scripts/sample_data/comparison/) 中的三份方案。
+2. 在“普通问答”中问“方案乙的更新顺序是什么？”，随后追问“等待多久？”。
+3. 切换“方案分析 · Agent”，输入“对比三份方案的一致性、恢复方式和实现运维成本，列出适用条件与待确认问题”。
+4. 查看任务进度和工具记录，核对报告引用，再尝试“哪份方案的生产 QPS 最高？”检查资料不足时的行为。
+
+三份文档是简化演示材料，不是经过生产验证的技术建议。mock 模式只能检查执行流程；真实分析需要配置模型 API，调用会使用相应额度。完整步骤见[演示说明](docs/upgrade-demo.md)。
+
+## 验证结果与限制
+
+| 验证项 | 已完成结果 | 口径 |
+|--------|------------|------|
+| 离线回归 | Windows 与 Linux 均通过 126 项测试 | 使用替身和 MockTransport，测试隔离真实 API 凭据 |
+| 真实 RAG 复测 | 20 条案例完成，无流式错误 | 覆盖单轮、追问、换话题、资料不足与对比问题 |
+| 真实 Agent 复测 | 20 条案例完成，无工具错误，进度正常更新 | 检查工具预算、来源编号和目标证据覆盖 |
+| 公网验收 | 普通问答、方案对比和 SSE 进度可用 | 保留线上原有数据与配置，已备份旧版本 |
+
+真实案例使用三份短文档，由助手对照资料检查，**不是独立人工标注的盲测**。`upgrade_cases.json` 的 `reviewed` 保留为 false；这些结果不能外推复杂文档上的成功率，也不能据此宣称 Agent 在所有问题上更优。
+
+验收中暴露并修复了两类具体问题：模型把定性描述扩大为无依据排名；模型改写步骤文本导致进度更新失败。后者改为整数步骤编号后，本批 20 条 Agent 复测未出现工具错误。详细过程见[验收记录](docs/deployment-2026-11-10.md)。
+
+同题记录工具保留回答、来源、工具事件、耗时和人工评分空栏：
+
+```bash
+# 只检查案例，不调用服务或模型
+python scripts/compare_modes.py --dry-run
+
+# 先上传演示文档，再小范围记录两种模式的结果
+python scripts/compare_modes.py --base http://127.0.0.1:8000 --limit 2
+
+# 全量离线回归
+python -m pytest -q
+```
 
 ## 技术栈
 
@@ -36,7 +109,7 @@
 | 混合融合 | RRF 倒数排名融合（k=60） |
 | 重排 | BAAI/bge-reranker-v2-m3（cross-encoder 精排候选集，可开关） |
 | 检索评估 | 自建测试集（LLM 反向生成 + 人工抽查）+ 手写 recall@k/MRR + 网格实验 |
-| 大模型 | DeepSeek（OpenAI 兼容，httpx 手写 SSE 流式客户端） |
+| 大模型 | DeepSeek：普通问答使用 SSE，Agent 使用工具调用；httpx 实现客户端 |
 | 文档解析 | PyMuPDF / python-docx / charset-normalizer |
 | 元数据 | SQLite（标准库） |
 | 前端 | 原生 HTML / CSS / JS（单页，无框架） |
@@ -45,6 +118,10 @@
 ## 快速开始
 
 ```bash
+# 获取代码
+git clone https://github.com/Maple-in-rain/docmind.git
+cd docmind
+
 # 1. 创建环境（Python 3.12）
 conda create -n docmind python=3.12 -y
 conda activate docmind
@@ -60,33 +137,83 @@ cp .env.example .env
 
 # 4. 启动
 uvicorn app.main:app --reload
-# 浏览器打开 http://127.0.0.1:8000/docs 查看接口文档
+# 浏览器打开 http://127.0.0.1:8000 使用应用
+# http://127.0.0.1:8000/docs 查看接口文档
 
 # Windows 控制台若中文日志乱码，用 UTF-8 模式启动：
 # python -X utf8 -m uvicorn app.main:app --reload
 ```
 
-## 系统架构
+## API 摘要
 
-```mermaid
-flowchart LR
-    A[文档上传<br>PDF/Word/MD/TXT] --> B[解析器]
-    B --> C[分块器<br>固定窗口+重叠]
-    C --> D[Embedding<br>bge-m3 API]
-    D --> E[(Chroma 向量库)]
-    C --> F[(SQLite 分块元数据)]
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/documents/upload` | 上传文档并入库（multipart） |
+| GET | `/api/documents` | 文档列表 |
+| DELETE | `/api/documents/{doc_id}` | 删除文档（向量+元数据同步清理） |
+| POST | `/api/search` | 检索调试（strategy: vector/bm25/hybrid，可选 rerank） |
+| POST | `/api/agent` | 技术方案分析，SSE 推送任务状态、工具记录和报告 |
+| POST | `/api/chat` | 聊天，默认 SSE 流式（`stream:false` 返回完整 JSON），支持多轮 |
+| GET | `/api/health` | 健康检查 + 统计 |
 
-    G[用户提问] --> H[查询向量化]
-    H --> I[向量检索 top-k]
-    F --> M[BM25 关键词检索<br>jieba + rank-bm25]
-    I --> N[RRF 混合融合<br>k=60]
-    M --> N
-    E --> I
-    N --> O[重排 bge-reranker<br>宽召回+精排序]
-    O --> J[Prompt 拼装<br>系统提示+片段+历史]
-    J --> K[DeepSeek<br>SSE 流式]
-    K --> L[前端流式渲染<br>答案+引用卡片]
+完整接口文档：启动后访问 `/docs`。
+
+## 项目结构
+
 ```
+app/
+├── agent/        # 方案分析：工具定义、请求内状态、模型驱动执行循环
+├── api/          # 路由层（薄封装：参数校验 → 调用服务）
+├── services/     # 编排层（入库 / 检索 / 追问补全 / 问答）
+├── parsers/      # 文档解析插件（pdf/docx/md/txt + 注册表）
+├── chunking/     # 分块策略插件（固定窗口，标题结构规划中）
+├── embeddings/   # 向量化插件（硅基流动 API）
+├── retrieval/    # 检索插件（向量库、BM25、RRF 融合）
+├── reranking/    # 重排插件（bge-reranker 精排候选集）
+├── llm/          # 大模型插件（DeepSeek 流式客户端）
+└── storage/      # SQLite 元数据 + 文件落盘
+
+eval/
+├── metrics.py          # 手写 recall@k / MRR@k（含单测）
+├── evaluate.py         # 网格实验：分块×重叠×策略×重排，一键复现
+├── testset_builder.py  # DeepSeek 反向生成测试集
+└── data/               # 原检索语料、84 条 QA、20 条升级案例与抽查记录
+
+loadtest/
+├── locustfile.py       # 压测任务（查询池与评估同源，含首 token 自定义事件）
+└── seed_docs.py        # 种子数据：上传语料到运行中的实例
+
+scripts/
+├── compare_modes.py    # 记录同题 RAG / Agent 回答、来源、调用次数与耗时
+└── sample_data/comparison/  # 三份可上传的简化技术方案
+
+docs/
+├── upgrade-demo.md     # 功能演示、使用方法和已知限制
+└── deployment-2026-11-10.md # 真实 API 验收与上线记录
+
+deploy/
+├── setup_server.sh     # Ubuntu 一键部署（conda + systemd + nginx + swap）
+├── docmind.service     # systemd 守护单元
+└── nginx.conf          # 反向代理（SSE 流式：proxy_buffering off）
+```
+
+分层原则：**依赖抽象接口，不依赖具体实现** —— 换供应商只需新增插件类 + 改配置。
+
+## 当前边界与后续工作
+
+- 当前解析依赖文档文本层，扫描 PDF 的 OCR、复杂表格和页码定位尚未实现。
+- 查询补全可能误解上下文；异常回退只能保证有退路，不能保证补全准确。
+- Agent 只分析已上传资料，无联网搜索、长期记忆或多 Agent 协作。
+- 超时或取消会阻止后续检索阶段、重试和证据写入；已发出的同步 HTTP 请求仍可能持续到自身超时。
+- 入库跨 SQLite 与 Chroma 的失败清理、BM25 增量索引和大文件异步入库仍待完善。
+- 下一步优先扩大有独立标注的困难案例，核对不同文档长度下的回答与引用质量。
+
+## 历史检索实验与压测
+
+以下保留升级前的检索实验和压测，便于复现与检查参数依据。它们不包含新增追问补全和 Agent 的性能，不能作为当前版本的端到端基准。
+
+<details>
+<summary>展开：36 组检索实验、数据口径与限制</summary>
 
 ## 检索质量评估（数据驱动，非拍脑袋）
 
@@ -147,6 +274,12 @@ python -X utf8 -m eval.evaluate          # 全量网格（断点续跑，只补�
 
 **评估限制**：语料仅 15 篇，58 条统一子集中的多组指标接近饱和；相关性标签由同一 embedding 模型辅助判定，可能偏向该模型的相似性判断。结果不代表独立人工标签或更大语料上的泛化效果。新增 20 条升级案例尚待人工审阅，不能当作已验证的收益。
 
+
+</details>
+
+<details>
+<summary>展开：历史 RAG 压测、计数修正与复现方法</summary>
+
 ## 性能压测（locust，两场景）
 
 **口径**：15 篇语料灌库（26 个 chunk，`loadtest/seed_docs.py`）；查询池 = 评估测试集 84 条真实问题；每场景 180 秒，报告为 P50/P95/P99（本机 Windows 20 逻辑核，实测值）。
@@ -195,66 +328,8 @@ DOCMIND_WAIT_MIN=0 DOCMIND_WAIT_MAX=0.1 python -X utf8 -m locust -f loadtest/loc
 # 定位瓶颈：PERF_LOG=1 启动服务后发请求，日志输出每段耗时
 ```
 
-## API 摘要
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/documents/upload` | 上传文档并入库（multipart） |
-| GET | `/api/documents` | 文档列表 |
-| DELETE | `/api/documents/{doc_id}` | 删除文档（向量+元数据同步清理） |
-| POST | `/api/search` | 检索调试（strategy: vector/bm25/hybrid，可选 rerank） |
-| POST | `/api/agent` | 技术方案分析，SSE 推送任务状态、工具记录和报告 |
-| POST | `/api/chat` | 聊天，默认 SSE 流式（`stream:false` 返回完整 JSON），支持多轮 |
-| GET | `/api/health` | 健康检查 + 统计 |
-
-完整接口文档：启动后访问 `/docs`。
-
-## 项目结构
-
-```
-app/
-├── api/          # 路由层（薄封装：参数校验 → 调用服务）
-├── services/     # 编排层（入库流水线 / 检索 / 问答）
-├── parsers/      # 文档解析插件（pdf/docx/md/txt + 注册表）
-├── chunking/     # 分块策略插件（固定窗口，标题结构规划中）
-├── embeddings/   # 向量化插件（硅基流动 API）
-├── retrieval/    # 检索插件（向量库、BM25、RRF 融合）
-├── reranking/    # 重排插件（bge-reranker 精排候选集）
-├── llm/          # 大模型插件（DeepSeek 流式客户端）
-└── storage/      # SQLite 元数据 + 文件落盘
-
-eval/
-├── metrics.py          # 手写 recall@k / MRR@k（含单测）
-├── evaluate.py         # 网格实验：分块×重叠×策略×重排，一键复现
-├── testset_builder.py  # DeepSeek 反向生成测试集
-└── data/               # 语料（15 篇技术文档）+ 测试集（84 条 QA）+ 抽查记录
-
-loadtest/
-├── locustfile.py       # 压测任务（查询池与评估同源，含首 token 自定义事件）
-└── seed_docs.py        # 种子数据：上传语料到运行中的实例
-
-deploy/
-├── setup_server.sh     # Ubuntu 一键部署（conda + systemd + nginx + swap）
-├── docmind.service     # systemd 守护单元
-└── nginx.conf          # 反向代理（SSE 流式：proxy_buffering off）
-```
-
-分层原则：**依赖抽象接口，不依赖具体实现** —— 换供应商只需新增插件类 + 改配置。
-
-## Roadmap
-
-- [x] 聊天链路启用重排/混合检索
-- [x] 压测体系 + 分段计时 + 部署工件
-- [ ] BM25 索引磁盘序列化 / 增量合并（当前为 SQLite 全量重建，<100 文档毫秒级）
-- [ ] Markdown 标题结构化分块
-- [ ] 大文件异步入库（任务队列）
-- [ ] 扫描版 PDF OCR
-- [x] 查询改写（多轮指代补全、失败回退，真实效果待人工验证）
-- [x] 单 Agent 技术方案分析（工具循环、预算、报告与引用编号检查）
-
-## 升级演示与验证
-
-详见 [演示说明](docs/upgrade-demo.md)。`scripts/sample_data/comparison/` 提供三份简化方案；`eval/data/upgrade_cases.json` 提供 20 条待人工审阅案例；`python scripts/compare_modes.py --dry-run` 可先检查案例，不调用模型。mock 演示仅证明流程。真实 API 的样例验收和上线结果见 [验收记录](docs/deployment-2026-11-10.md)，小规模案例结果不代表复杂文档上的普遍效果。
+</details>
 
 ## License
 
