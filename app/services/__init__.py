@@ -19,6 +19,8 @@ from ..storage.file_store import FileStore
 from .chat_service import ChatService
 from .ingestion_service import IngestionService
 from .search_service import SearchService
+from ..agent.service import AgentService
+from ..agent.tools import AgentTools
 
 
 def _select_embedder():
@@ -70,4 +72,5 @@ def build_services() -> dict:
         "ingestion": IngestionService(file_store, chunker, embedder, vector_store, db, bm25_index),
         "search": search_service,
         "chat": ChatService(search_service, llm),  # 问答复用检索服务：hybrid + 重排
+        "agent_factory": lambda: AgentService(llm, AgentTools(search_service, db)),
     }

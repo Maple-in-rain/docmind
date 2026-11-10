@@ -28,6 +28,15 @@ const chatScrollEl = $("#chat-scroll");
 const inputEl = $("#input");
 const sendBtn = $("#send-btn");
 const uploadStatusEl = $("#upload-status");
+const modeEl = $("#chat-mode");
+modeEl.addEventListener("change", () => {
+  $("#mode-hint").textContent = modeEl.value === "agent"
+    ? "比较多份技术方案，按需查找证据并整理报告；通常耗时更长。"
+    : "从文档中检索并回答，支持连续追问。";
+  inputEl.placeholder = modeEl.value === "agent"
+    ? "例如：比较上传方案的一致性、故障恢复和适用条件，列出待确认问题"
+    : "输入问题，Enter 发送，Shift+Enter 换行";
+});
 
 // ---------- 文档管理 ----------
 
@@ -140,10 +149,10 @@ function renderSources(sources) {
     no.textContent = `[${i + 1}]`;
     const title = document.createElement("span");
     title.className = "src-title";
-    title.textContent = s.title || "文档";
+    title.textContent = (s.title || "文档") + (s.seq != null ? ` · 片段 ${s.seq + 1}` : "");
     const score = document.createElement("span");
     score.className = "src-score";
-    score.textContent = s.score != null ? `相关度 ${(s.score * 100).toFixed(1)}%` : "";
+    score.textContent = s.score != null ? `排序分 ${s.score.toFixed(3)}` : "";
     head.append(no, title, score);
 
     const text = document.createElement("div");
@@ -174,11 +183,13 @@ async function sendMessage(text) {
   if (!question) return;
 
   state.streaming = true;
+  const isAgent = modeEl.value === "agent";
+  modeEl.disabled = true;
   sendBtn.disabled = true;
   welcomeEl.style.display = "none";
 
   // 记录并渲染用户消息
-  state.messages.push({ role: "user", content: question });
+  if (!isAgent) state.messages.push({ role: "user", content: question });
   renderMessage("user", question);
 
   // 助手回答占位（先显示"检索中"状态行）
@@ -197,6 +208,18 @@ async function sendMessage(text) {
   cursor.className = "typing-cursor";
   wrap.appendChild(answerEl);
   wrap.appendChild(cursor);
+  const trace = document.createElement("details");
+  trace.className = "agent-trace";
+  const traceTitle = document.createElement("summary");
+  traceTitle.textContent = "分析进度与查找记录";
+  const taskState = document.createElement("p");
+  const toolLog = document.createElement("ol");
+  trace.append(traceTitle, taskState, toolLog);
+  if (isAgent) {
+    trace.open = true;
+    wrap.prepend(trace);
+    statusEl.textContent = "正在制定比较任务…";
+  }
   messagesEl.appendChild(wrap);
 
   let fullAnswer = "";
@@ -205,13 +228,29 @@ async function sendMessage(text) {
 
   try {
     await postChatSSE(
-      {
-        messages: state.messages,
+      isAgent ? { task: question } : {
+        messages: state.messages.slice(-19),
         top_k: 5,
         stream: true,
       },
       (event) => {
-        if (event.type === "sources") {
+        if (event.type === "task") {
+          const current = event.state;
+          taskState.textContent = (current.steps || []).map(step =>
+            `${(current.completed || []).includes(step) ? "已完成" : "待检查"}：${step}`).join("； ")
+            + (current.gaps?.length ? `。待确认：${current.gaps.join("；")}` : "");
+        } else if (event.type === "tool") {
+          const item = document.createElement("li");
+          const names = { list_documents: "查看文档", search_documents: "搜索证据", read_context: "读取上下文", update_task: "更新任务" };
+          item.textContent = `${names[event.name] || event.name}：${event.summary}`;
+          if (event.arguments?.query) item.textContent += `（${event.arguments.query}）`;
+          toolLog.appendChild(item);
+          statusEl.textContent = "正在查找与核对资料…";
+        } else if (event.type === "done" && event.status) {
+          const labels = { completed: "报告已生成，请核对引用", tool_limit: "达到查找次数上限，任务未完成", timeout: "分析超时", round_limit: "达到执行轮数上限", no_evidence: "未找到证据", invalid_citations: "报告引用检查未通过", model_error: "模型调用失败" };
+          traceTitle.textContent = `${labels[event.status] || event.status} · 查找 ${event.tool_calls} 次 · ${(event.elapsed_ms / 1000).toFixed(1)} 秒`;
+          failed = event.status !== "completed";
+        } else if (event.type === "sources") {
           sources = event.sources;
           // 来源先于回答到达，立即渲染引用卡
           const existing = wrap.querySelector(".sources");
@@ -226,7 +265,8 @@ async function sendMessage(text) {
           fullAnswer = fullAnswer || `出错了：${event.message}`;
           answerEl.textContent = fullAnswer;
         }
-      }
+      },
+      isAgent ? "/api/agent" : "/api/chat"
     );
   } catch (e) {
     failed = true;
@@ -237,10 +277,23 @@ async function sendMessage(text) {
   cursor.remove();
 
   // 正常结束时把助手回答写入历史（失败的回答不参与上下文）
-  if (!failed) state.messages.push({ role: "assistant", content: fullAnswer });
+  if (!failed && !isAgent) state.messages.push({ role: "assistant", content: fullAnswer });
+  if (isAgent && fullAnswer) {
+    const copy = document.createElement("button");
+    copy.className = "btn-ghost";
+    copy.textContent = "复制报告";
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(fullAnswer);
+        copy.textContent = "已复制";
+      } catch { copy.textContent = "请选中报告文字复制"; }
+    });
+    wrap.appendChild(copy);
+  }
 
   state.streaming = false;
   sendBtn.disabled = false;
+  modeEl.disabled = false;
   inputEl.focus();
 }
 
@@ -249,8 +302,8 @@ async function sendMessage(text) {
  * 事件帧格式：每个事件以 "data: {...}" 行开始，事件之间空行分隔，
  * 流以 "data: [DONE]" 结束。
  */
-async function postChatSSE(body, onEvent) {
-  const resp = await fetch("/api/chat", {
+async function postChatSSE(body, onEvent, endpoint = "/api/chat") {
+  const resp = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

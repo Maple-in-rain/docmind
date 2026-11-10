@@ -726,3 +726,11 @@ body::after {
   .welcome-title { font-size: 30px; }
   .debug-columns { grid-template-columns: 1fr; }
 }
+/* 复用书斋配色，在输入区上方提供任务选择与可折叠查找记录。 */
+.mode-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 28px; font-size: 13px; }
+.mode-controls select { font: inherit; color: inherit; padding: 6px 10px; background: transparent; border: 1px solid #cbbda6; border-radius: 6px; }
+.mode-controls span { opacity: .7; }
+.agent-trace { font-size: 13px; padding: 12px 16px; margin-bottom: 16px; border-left: 2px solid #ab795c; background: #f4efe5; overflow-wrap: anywhere; }
+.agent-trace summary { cursor: pointer; }
+.agent-trace li { margin: 6px 0; }
+@media (max-width: 640px) { .mode-controls { margin: 8px 16px; } }

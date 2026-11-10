@@ -15,7 +15,7 @@ def _provider(response_factory):
         body = json.loads(request.content)
         return httpx.Response(200, json=response_factory(body))
 
-    return SiliconFlowRerankerProvider(transport=httpx.MockTransport(handler))
+    return SiliconFlowRerankerProvider(api_key="test-key", transport=httpx.MockTransport(handler))
 
 
 def test_rerank_basic_and_payload():
@@ -55,7 +55,7 @@ def test_rerank_empty_documents_no_network():
     def boom(request):
         raise AssertionError("空文档列表不应发起请求")
 
-    p = SiliconFlowRerankerProvider(transport=httpx.MockTransport(boom))
+    p = SiliconFlowRerankerProvider(api_key="test-key", transport=httpx.MockTransport(boom))
     assert p.rerank("q", []) == []
 
 
@@ -67,7 +67,7 @@ def test_rerank_400_raises_immediately():
         calls["n"] += 1
         return httpx.Response(400, json={"error": "bad request"})
 
-    p = SiliconFlowRerankerProvider(transport=httpx.MockTransport(handler))
+    p = SiliconFlowRerankerProvider(api_key="test-key", transport=httpx.MockTransport(handler))
     with pytest.raises(httpx.HTTPStatusError):
         p.rerank("q", ["a"])
     assert calls["n"] == 1
@@ -83,7 +83,7 @@ def test_rerank_retries_on_429_then_succeeds():
             return httpx.Response(429, json={"error": "rate limited"}, headers={"Retry-After": "0.01"})
         return httpx.Response(200, json={"results": [{"index": 0, "relevance_score": 0.8}]})
 
-    p = SiliconFlowRerankerProvider(transport=httpx.MockTransport(handler))
+    p = SiliconFlowRerankerProvider(api_key="test-key", transport=httpx.MockTransport(handler))
     assert p.rerank("q", ["a"]) == [(0, 0.8)]
     assert calls["n"] == 3
 
@@ -92,7 +92,7 @@ def test_rerank_429_exhausts_retries():
     def handler(request):
         return httpx.Response(429, json={}, headers={"Retry-After": "0.01"})
 
-    p = SiliconFlowRerankerProvider(transport=httpx.MockTransport(handler))
+    p = SiliconFlowRerankerProvider(api_key="test-key", transport=httpx.MockTransport(handler))
     with pytest.raises(RuntimeError, match="已重试"):
         p.rerank("q", ["a"])
 

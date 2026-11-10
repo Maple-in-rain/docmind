@@ -28,7 +28,10 @@ class SiliconFlowRerankerProvider(RerankerProvider):
         self.model = model or settings.rerank_model
         self.transport = transport  # 测试注入用，生产为 None（真实网络）
 
-    def rerank(self, query: str, documents: list[str], top_n: int | None = None) -> list[tuple[int, float]]:
+    def rerank_cancellable(self, query, documents, top_n=None, cancel_event=None):
+        return self.rerank(query, documents, top_n, cancel_event=cancel_event)
+
+    def rerank(self, query: str, documents: list[str], top_n: int | None = None, cancel_event=None) -> list[tuple[int, float]]:
         if not documents:
             return []
         if not self.api_key:
@@ -37,7 +40,7 @@ class SiliconFlowRerankerProvider(RerankerProvider):
         payload: dict = {"model": self.model, "query": query, "documents": documents}
         if top_n is not None:
             payload["top_n"] = min(top_n, len(documents))
-        data = self._post(payload)
+        data = self._post(payload, cancel_event)
 
         results = data.get("results", [])
         # 防御性重排序：不信任 API 返回顺序，按相关性分数降序重排
@@ -47,10 +50,12 @@ class SiliconFlowRerankerProvider(RerankerProvider):
         )
         return scored[:top_n] if top_n else scored
 
-    def _post(self, payload: dict) -> dict:
+    def _post(self, payload: dict, cancel_event=None) -> dict:
         """单次请求 + 重试：429/5xx 指数退避，尊重 Retry-After 头"""
         last_error: Exception | None = None
         for attempt in range(_MAX_RETRIES):
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("重排任务已停止")
             try:
                 with httpx.Client(timeout=60, transport=self.transport) as client:
                     resp = client.post(
@@ -66,6 +71,11 @@ class SiliconFlowRerankerProvider(RerankerProvider):
                 if status not in _RETRY_STATUSES and status < 500:
                     raise  # 4xx（除 429）：请求本身的问题，重试无意义
                 retry_after = float(e.response.headers.get("Retry-After", "") or 0)
-                time.sleep(retry_after if retry_after > 0 else 2 ** attempt)  # 1s、2s、4s
+                delay = retry_after if retry_after > 0 else 2 ** attempt
+                if cancel_event is not None:
+                    if cancel_event.wait(delay):
+                        raise RuntimeError("重排任务已停止")
+                else:
+                    time.sleep(delay)
         raise RuntimeError(f"重排请求失败（已重试 {_MAX_RETRIES} 次）: {last_error}")
 

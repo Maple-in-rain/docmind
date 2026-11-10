@@ -48,6 +48,23 @@ class DeepSeekProvider(LLMProvider):
                     await asyncio.sleep(2 ** attempt)
         raise RuntimeError(f"DeepSeek 请求失败（已重试 {_MAX_RETRIES} 次）: {last_error}")
 
+    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+        """工具执行交给服务层；保留模型返回的调用 ID 和参数。"""
+        if not self.api_key:
+            raise RuntimeError("未配置 DEEPSEEK_API_KEY")
+        payload = {"model": self.model, "messages": messages, "stream": False,
+                   "max_tokens": 2048, "temperature": 0}
+        if tools:
+            payload["tools"] = tools
+        async with httpx.AsyncClient(timeout=60, transport=self._transport) as client:
+            response = await client.post(f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"}, json=payload)
+            response.raise_for_status()
+            choice = response.json()["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise RuntimeError("模型回复被截断，请缩小分析范围")
+        return choice["message"]
+
     async def _request_stream(self, messages: list[dict]) -> AsyncIterator[str]:
         """单次流式请求：逐行解析 SSE 帧，产出增量文本。
 

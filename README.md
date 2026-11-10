@@ -2,7 +2,7 @@
 
 上传文档，问它问题——支持多格式文档（PDF / Word / Markdown / TXT）的知识库问答系统。基于 RAG（检索增强生成）架构：先把文档切块向量化入库，提问时检索最相关的片段，交给大模型结合上下文生成答案，并给出引用来源。
 
-> 核心亮点：**数据驱动的检索质量工程** —— 可插拔的分块/检索策略 + 自建评估体系（recall@k / MRR）+ 压测报告，用数据证明"混合检索为什么更好"。
+> 核心亮点：**数据驱动的检索质量工程** —— 可插拔的分块/检索策略 + 自建评估体系（recall@k / MRR）+ 压测报告，比较不同检索配置的效果与限制；新增可观察的技术方案对比 Agent。
 >
 > **在线演示**：http://42.192.115.149/
 
@@ -17,7 +17,9 @@
 - [x] 重排：bge-reranker-v2-m3 精排候选集（可开关，"宽召回 + 精排序"）
 - [x] 检索质量评估：LLM 反向生成测试集（84 条 QA，人工抽查）+ 手写 recall@k / MRR + 36 格网格实验
 - [x] 前端「检索台」调试面板：三策略并排对比、两路排名徽章互参
-- [x] 流式问答（SSE）+ 多轮对话 + 引用溯源
+- [x] 流式问答（SSE）+ 多轮问题补全（异常回退、可关闭）+ 实际上下文片段引用
+- [x] 技术方案对比 Agent：模型驱动工具调用、请求内任务状态、证据编号、调用预算与终止记录
+- [x] 方案分析模式、查找记录与 Markdown 报告复制（使用说明见 `docs/upgrade-demo.md`）
 - [x] 聊天前端：手写 HTML/CSS/JS 单页（书斋主题，零框架零构建）
 - [x] provider 可切换（mock 离线压测）+ 分段计时诊断（PERF_LOG）
 - [x] 压测报告（locust，含 P50/P95/P99，两场景）
@@ -38,7 +40,7 @@
 | 文档解析 | PyMuPDF / python-docx / charset-normalizer |
 | 元数据 | SQLite（标准库） |
 | 前端 | 原生 HTML / CSS / JS（单页，无框架） |
-| 测试/压测 | pytest（100+ 用例，全离线）/ locust（两场景报告 + 分段计时定位瓶颈） |
+| 测试/压测 | pytest（126 个用例，全离线）/ locust（两场景报告 + 分段计时定位瓶颈） |
 
 ## 快速开始
 
@@ -140,8 +142,10 @@ python -X utf8 -m eval.evaluate          # 全量网格（断点续跑，只补�
 
 1. **重排是最大的单一变量**：小分块下把 recall@3 平均拉升约 10pp（chunk256 bm25 0.83→0.94），大分块下 MRR 仍稳定提升——「宽召回 + 精排序」在本语料上成立；
 2. **分块 256 过碎**（段落被切断、上下文不足），512/768 显著更优；768 分块自带充足上下文，与 512 差距在噪声内，重叠收益趋零——默认取 768/0，块数最少、效果相同；
-3. **重排开启后三策略趋同**：重排吸收了混合融合的收益，hybrid 在无重排时稳定不输单路——所以默认策略 hybrid + 重排，只赚不亏；
-4. 系统默认参数 chunk 768 / 无重叠 / hybrid / rerank on 均来自本表，可随时用 `eval/evaluate.py` 复现。
+3. **重排开启后三策略趋同**：重排吸收了混合融合的收益，当前表中 hybrid 与单路的差距取决于分块配置，并不总是领先；保留 hybrid + 重排作为当前默认，但不能据此宣称普遍更优；
+4. 系统默认参数 chunk 768 / 无重叠 / hybrid / rerank on 均参考本表，可用 `eval/evaluate.py` 复现。
+
+**评估限制**：语料仅 15 篇，58 条统一子集中的多组指标接近饱和；相关性标签由同一 embedding 模型辅助判定，可能偏向该模型的相似性判断。结果不代表独立人工标签或更大语料上的泛化效果。新增 20 条升级案例尚待人工审阅，不能当作已验证的收益。
 
 ## 性能压测（locust，两场景）
 
@@ -157,7 +161,7 @@ python -X utf8 -m eval.evaluate          # 全量网格（断点续跑，只补�
 | /api/search P50 / P95 / P99 | 630 / 860 / 3400 ms | 130 / 210 / 260 ms |
 | /api/chat 首 token P50 / P95 | 1100 / 1500 ms | 80 / 150 ms |
 | /api/chat 全量 P50 / P95 / P99 | 2400 / 3700 / 4300 ms | 270 / 380 / 450 ms |
-| RPS / 失败率 | ~1.5 / 0%（含思考时间） | search 143 + chat 71（聚合 357）/ 0% |
+| RPS / 失败率 | ~1.5 / 0%（含思考时间） | search 143 + chat 71 ≈ 214 业务请求/s（统计事件聚合 357）/ 0% |
 
 **分段计时**（PERF_LOG=1，单请求归因；外部 API 延迟含网络往返）：
 
@@ -172,10 +176,10 @@ python -X utf8 -m eval.evaluate          # 全量网格（断点续跑，只补�
 
 **结论**：
 
-1. **延迟大头全在外部 API**：embed + rerank + LLM 首 token 占端到端 ~95%，本地组件（Chroma / SQLite / BM25 / RRF）全部 ≤2ms——检索架构本身没有性能债；
-2. **系统自身吞吐足够**：全 mock 50 并发零思考时间，6.4 万请求 0 失败，search 143 rps / chat 71 rps；场景 2 的 P50 主要来自高并发排队（FastAPI 同步端点线程池 40 + `to_thread` 默认线程池），而非计算；
-3. **场景 2 检索结果无语义**（mock 哈希向量），但每条代码路径与真实一致，吞吐结论成立；
-4. 场景 1 P99 长尾（3.4s）来自免费额度 API 限流与偶发 TLS 重连，商用 key 可消除；优化方向：embed/rerank 改异步 httpx + 共享连接池（现状每次调用新建连接，TLS 握手按次付费）。
+1. **延迟大头全在外部 API**：embed + rerank + LLM 首 token 占端到端 ~95%，本地组件（Chroma / SQLite / BM25 / RRF）全部 ≤2ms——这些数字仅覆盖本次小语料与测试条件，不能外推大规模性能；
+2. **系统自身吞吐足够**：全 mock 50 并发零思考时间，约 6.4 万统计事件未记录失败；聊天的 headers、first-token、full-answer 重复计入聚合，每个业务请求只应计一次，search 143 rps / chat 71 rps，合计约 214 业务请求/s；场景 2 的 P50 主要来自高并发排队（FastAPI 同步端点线程池 40 + `to_thread` 默认线程池），而非计算；
+3. **场景 2 检索结果无语义**（mock 哈希向量），但每条代码路径与真实一致，仅适合观察 mock 条件下的服务开销，不能代表真实模型场景的吞吐；
+4. 场景 1 P99 长尾（3.4s）的具体原因需要结合请求日志进一步验证，不能保证更换 key 即可消除；优化方向：embed/rerank 改异步 httpx + 共享连接池（现状每次调用新建连接，TLS 握手按次付费）。
 
 **复现**：
 
@@ -191,8 +195,6 @@ DOCMIND_WAIT_MIN=0 DOCMIND_WAIT_MAX=0.1 python -X utf8 -m locust -f loadtest/loc
 # 定位瓶颈：PERF_LOG=1 启动服务后发请求，日志输出每段耗时
 ```
 
-
-
 ## API 摘要
 
 | 方法 | 路径 | 说明 |
@@ -201,6 +203,7 @@ DOCMIND_WAIT_MIN=0 DOCMIND_WAIT_MAX=0.1 python -X utf8 -m locust -f loadtest/loc
 | GET | `/api/documents` | 文档列表 |
 | DELETE | `/api/documents/{doc_id}` | 删除文档（向量+元数据同步清理） |
 | POST | `/api/search` | 检索调试（strategy: vector/bm25/hybrid，可选 rerank） |
+| POST | `/api/agent` | 技术方案分析，SSE 推送任务状态、工具记录和报告 |
 | POST | `/api/chat` | 聊天，默认 SSE 流式（`stream:false` 返回完整 JSON），支持多轮 |
 | GET | `/api/health` | 健康检查 + 统计 |
 
@@ -246,7 +249,12 @@ deploy/
 - [ ] Markdown 标题结构化分块
 - [ ] 大文件异步入库（任务队列）
 - [ ] 扫描版 PDF OCR
-- [ ] 查询改写（多轮指代消解）
+- [x] 查询改写（多轮指代补全、失败回退，真实效果待人工验证）
+- [x] 单 Agent 技术方案分析（工具循环、预算、报告与引用编号检查）
+
+## 升级演示与验证
+
+详见 [演示说明](docs/upgrade-demo.md)。`scripts/sample_data/comparison/` 提供三份简化方案；`eval/data/upgrade_cases.json` 提供 20 条待人工审阅案例；`python scripts/compare_modes.py --dry-run` 可先检查案例，不调用模型。mock 演示仅证明流程。真实 API 的样例验收和上线结果见 [验收记录](docs/deployment-2026-11-10.md)，小规模案例结果不代表复杂文档上的普遍效果。
 
 ## License
 

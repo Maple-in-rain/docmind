@@ -40,7 +40,11 @@ class SearchService:
         self.bm25_index = bm25_index
         self.reranker = reranker
 
-    def search(self, query: str, strategy: str = "vector", top_k: int = 10, rerank: bool = False) -> list[dict]:
+    def search(self, query: str, strategy: str = "vector", top_k: int = 10, rerank: bool = False, cancel_event=None) -> list[dict]:
+        def check_cancelled():
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("检索任务已停止")
+        check_cancelled()
         if rerank and self.reranker is None:
             raise RuntimeError("重排未配置（缺少 RerankerProvider）")
 
@@ -55,6 +59,7 @@ class SearchService:
         # 两路检索只在需要时计算
         if strategy in ("vector", "hybrid"):
             query_embedding = self.embedder.embed([query])[0]
+            check_cancelled()
             pt.segment("embed")  # 外部 API：查询向量化
             vector_hits = [
                 (chunk_id, score)
@@ -62,6 +67,7 @@ class SearchService:
             ]
             pt.segment("vector_query")  # Chroma 本地检索
         if strategy in ("bm25", "hybrid"):
+            check_cancelled()
             bm25_hits = self.bm25_index.search(query, candidate_k)
             pt.segment("bm25")  # jieba 分词 + BM25 本地打分
 
@@ -85,11 +91,16 @@ class SearchService:
         # 精排：候选池文本送 cross-encoder，按下标重排并截断
         rerank_scores: dict[str, float] = {}
         if rerank and merged:
-            ranked = self.reranker.rerank(
+            check_cancelled()
+            rerank_method = self.reranker.rerank if cancel_event is None else self.reranker.rerank_cancellable
+            extra = {} if cancel_event is None else {"cancel_event": cancel_event}
+            ranked = rerank_method(
                 query,
                 [chunks[cid]["text"] for cid, _s in merged],
                 top_n=top_k,
+                **extra,
             )
+            check_cancelled()
             pt.segment("rerank")  # 外部 API：cross-encoder 精排
             rerank_scores = {merged[i][0]: score for i, score in ranked}
             merged = [(merged[i][0], merged[i][1]) for i, _score in ranked]

@@ -9,6 +9,11 @@ class RerankerProvider(ABC):
     与 EmbeddingProvider 相同的插件哲学：换重排模型只需新增实现类。
     """
 
+    def rerank_cancellable(self, query, documents, top_n=None, cancel_event=None):
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("重排任务已停止")
+        return self.rerank(query, documents, top_n)
+
     @abstractmethod
     def rerank(self, query: str, documents: list[str], top_n: int | None = None) -> list[tuple[int, float]]:
         """返回 [(原文档下标, 相关性分数)]，按分数降序；top_n 限制返回数量。

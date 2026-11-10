@@ -1,0 +1,330 @@
+[
+  {
+    "id": "upgrade-01",
+    "kind": "single",
+    "question": "方案甲先更新什么？",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案甲-CacheAside.md",
+        "passage": "先更新数据库，数据库写入成功后删除缓存。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-02",
+    "kind": "single",
+    "question": "方案甲删除缓存失败后怎么办？",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案甲-CacheAside.md",
+        "passage": "删除缓存失败时记录重试任务，由后台任务再次删除。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-03",
+    "kind": "single",
+    "question": "方案甲适用于什么业务？",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案甲-CacheAside.md",
+        "passage": "适合读多写少、允许短暂旧数据的业务。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-04",
+    "kind": "single",
+    "question": "方案乙的更新顺序是什么？",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案乙-延迟双删.md",
+        "passage": "先删除缓存，再更新数据库，等待一段时间后再次删除缓存。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-05",
+    "kind": "single",
+    "question": "方案乙固定等待500毫秒就能避免所有竞争吗？",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案乙-延迟双删.md",
+        "passage": "固定等待时间不能保证消除所有并发竞争。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-06",
+    "kind": "single",
+    "question": "事务事件表方案的消费者需要什么能力？",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案丙-Outbox.md",
+        "passage": "消费者需要支持幂等，失败事件可重试并记录处理状态。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-07",
+    "kind": "followup",
+    "question": "它失败了怎么处理？",
+    "history": [
+      {
+        "role": "user",
+        "content": "方案甲如何删除缓存？"
+      },
+      {
+        "role": "assistant",
+        "content": "数据库写入成功后删除缓存。"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "file": "方案甲-CacheAside.md",
+        "passage": "删除缓存失败时记录重试任务，由后台任务再次删除。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-08",
+    "kind": "followup",
+    "question": "等待多久？",
+    "history": [
+      {
+        "role": "user",
+        "content": "方案乙的第二次删除怎么执行？"
+      },
+      {
+        "role": "assistant",
+        "content": "更新数据库后等待一段时间，再次删除。"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "file": "方案乙-延迟双删.md",
+        "passage": "示例等待时间为 500 毫秒，需要结合实际读写耗时调整。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-09",
+    "kind": "followup",
+    "question": "它需要幂等吗？",
+    "history": [
+      {
+        "role": "user",
+        "content": "方案丙的消费者做什么？"
+      },
+      {
+        "role": "assistant",
+        "content": "读取事件并执行缓存失效。"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "file": "方案丙-Outbox.md",
+        "passage": "消费者需要支持幂等，失败事件可重试并记录处理状态。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-10",
+    "kind": "topic_change",
+    "question": "方案乙的示例等待时间是多少？",
+    "history": [
+      {
+        "role": "user",
+        "content": "方案甲有哪些限制？"
+      },
+      {
+        "role": "assistant",
+        "content": "不保证强一致性。"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "file": "方案乙-延迟双删.md",
+        "passage": "示例等待时间为 500 毫秒"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-11",
+    "kind": "topic_change",
+    "question": "方案丙是否指定了消息队列产品？",
+    "history": [
+      {
+        "role": "user",
+        "content": "方案乙需要等多久？"
+      },
+      {
+        "role": "assistant",
+        "content": "示例是500毫秒。"
+      }
+    ],
+    "gold_evidence": [
+      {
+        "file": "方案丙-Outbox.md",
+        "passage": "本文没有指定消息队列产品"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-12",
+    "kind": "unanswerable",
+    "question": "方案甲生产环境的QPS是多少？",
+    "history": [],
+    "gold_evidence": [],
+    "expected_behavior": "明确文档未提供数据，不编造结论",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-13",
+    "kind": "unanswerable",
+    "question": "方案乙最优等待时间是多少？",
+    "history": [],
+    "gold_evidence": [],
+    "expected_behavior": "明确文档未提供数据，不编造结论",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-14",
+    "kind": "unanswerable",
+    "question": "方案丙保证多少毫秒内完成缓存失效？",
+    "history": [],
+    "gold_evidence": [],
+    "expected_behavior": "明确文档未提供数据，不编造结论",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-15",
+    "kind": "unanswerable",
+    "question": "这三份方案的具体云服务器账单是多少？",
+    "history": [],
+    "gold_evidence": [],
+    "expected_behavior": "明确文档未提供数据，不编造结论",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-16",
+    "kind": "compare",
+    "question": "比较方案甲与方案乙的更新顺序并标出依据。",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案甲-CacheAside.md",
+        "passage": "先更新数据库，数据库写入成功后删除缓存。"
+      },
+      {
+        "file": "方案乙-延迟双删.md",
+        "passage": "先删除缓存，再更新数据库，等待一段时间后再次删除缓存。"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-17",
+    "kind": "compare",
+    "question": "三份方案都保证强一致性吗？区分文档事实与推断。",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案甲-CacheAside.md",
+        "passage": "不保证强一致性"
+      },
+      {
+        "file": "方案乙-延迟双删.md",
+        "passage": "不保证强一致性"
+      },
+      {
+        "file": "方案丙-Outbox.md",
+        "passage": "不保证强一致性"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-18",
+    "kind": "compare",
+    "question": "比较三份方案失败恢复的方式，列出缺失信息。",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案甲-CacheAside.md",
+        "passage": "由后台任务再次删除"
+      },
+      {
+        "file": "方案乙-延迟双删.md",
+        "passage": "第二次删除失败时记录重试任务"
+      },
+      {
+        "file": "方案丙-Outbox.md",
+        "passage": "失败事件可重试并记录处理状态"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-19",
+    "kind": "compare",
+    "question": "对比三份方案的一致性、恢复方式和实现运维成本，列出适用条件与待确认问题。",
+    "history": [],
+    "gold_evidence": [
+      {
+        "file": "方案甲-CacheAside.md",
+        "passage": "实现成本较低"
+      },
+      {
+        "file": "方案乙-延迟双删.md",
+        "passage": "需要关注延迟任务执行与重试状态"
+      },
+      {
+        "file": "方案丙-Outbox.md",
+        "passage": "运维成本包括事件表清理、积压监控和失败任务处理"
+      }
+    ],
+    "expected_behavior": "引用支持结论的实际片段，缺失信息如实说明",
+    "reviewed": false
+  },
+  {
+    "id": "upgrade-20",
+    "kind": "compare",
+    "question": "哪种方案在生产压测中吞吐量最高？请根据文档回答，不要推测。",
+    "history": [],
+    "gold_evidence": [],
+    "expected_behavior": "明确文档未提供数据，不编造结论",
+    "reviewed": false
+  }
+]

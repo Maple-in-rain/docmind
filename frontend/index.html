@@ -53,6 +53,14 @@
       <div id="messages"></div>
     </div>
 
+    <div class="mode-controls">
+      <label for="chat-mode">任务模式</label>
+      <select id="chat-mode">
+        <option value="chat">普通问答</option>
+        <option value="agent">方案分析 · Agent</option>
+      </select>
+      <span id="mode-hint">从文档中检索并回答，支持连续追问。</span>
+    </div>
     <div class="composer">
       <textarea id="input" rows="1" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
       <button class="send-btn" id="send-btn" title="发送">

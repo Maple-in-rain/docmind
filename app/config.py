@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     embedding_provider: str = "siliconflow"  # siliconflow | mock
     rerank_provider: str = "siliconflow"  # siliconflow | mock
     perf_log: bool = False  # PERF_LOG=1 开启分段计时日志（定位延迟瓶颈）
+    query_rewrite_enabled: bool = True
 
 
 settings = Settings()

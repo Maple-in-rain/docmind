@@ -6,7 +6,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---- 文档管理 ----
@@ -49,9 +49,19 @@ class SearchResult(BaseModel):
 
 # ---- 聊天（第 2 周启用）----
 
+class AgentRequest(BaseModel):
+    task: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def nonempty_task(self):
+        self.task = self.task.strip()
+        if not self.task:
+            raise ValueError("分析任务不能为空")
+        return self
+
 class ChatMessage(BaseModel):
-    role: Literal["user", "assistant", "system"]
-    content: str
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=12000)
 
 
 class ChatRequest(BaseModel):
@@ -59,9 +69,16 @@ class ChatRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     stream: bool = True
 
+    @model_validator(mode="after")
+    def last_message_is_question(self):
+        if self.messages[-1].role != "user" or not self.messages[-1].content.strip():
+            raise ValueError("最后一条消息必须是用户问题")
+        return self
+
 
 class Source(BaseModel):
     text: str
+    chunk_id: str | None = None
     doc_id: int
     seq: int | None = None
     title: str = ""
