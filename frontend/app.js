@@ -41,7 +41,7 @@ modeEl.addEventListener("change", () => {
 // ---------- 文档管理 ----------
 
 async function loadDocs() {
-  const resp = await fetch("/api/documents");
+  const resp = await fetch(apiUrl("/api/documents"));
   state.docs = await resp.json();
   renderDocs();
 }
@@ -79,7 +79,7 @@ function renderDocs() {
     del.title = "删除该文档（向量与元数据一并清理）";
     del.addEventListener("click", async () => {
       if (!confirm(`确定删除《${doc.title}》？相关内容将从知识库中移除。`)) return;
-      await fetch(`/api/documents/${doc.doc_id}`, { method: "DELETE" });
+      await fetch(apiUrl(`/api/documents/${doc.doc_id}`), { method: "DELETE" });
       loadDocs();
     });
 
@@ -99,7 +99,7 @@ async function handleUpload(file) {
   const form = new FormData();
   form.append("file", file);
   try {
-    const resp = await fetch("/api/documents/upload", { method: "POST", body: form });
+    const resp = await fetch(apiUrl("/api/documents/upload"), { method: "POST", body: form });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || "上传失败");
     uploadStatusEl.textContent = `已入库：《${data.title}》· ${data.chunk_count} 个片段`;
@@ -303,7 +303,7 @@ async function sendMessage(text) {
  * 流以 "data: [DONE]" 结束。
  */
 async function postChatSSE(body, onEvent, endpoint = "/api/chat") {
-  const resp = await fetch(endpoint, {
+  const resp = await fetch(apiUrl(endpoint), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -379,7 +379,7 @@ async function runDebugSearch() {
 
   const hitsByStrategy = await Promise.all(
     ["vector", "bm25", "hybrid"].map((s) =>
-      fetch("/api/search", {
+      fetch(apiUrl("/api/search"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query, strategy: s, top_k: topK, rerank }),

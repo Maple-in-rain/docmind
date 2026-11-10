@@ -2,7 +2,7 @@
 
 ## 上线结果
 
-- 地址：http://42.192.115.149/
+- 当前地址：https://42.192.115.149/docmind/ （同日后续修正，原因和验证见文末）
 - 版本：20261110-rag-agent-02。
 - 发布包 SHA-256：`623f81f550ed1fe1d4502532362cc7f1deae3942b5cf532a2d38356e8a27a464`。
 - 本地 Windows 与服务器 Linux 暂存环境均通过 126 项离线测试，各有 2 个依赖弃用警告；JavaScript 语法检查通过。
@@ -42,3 +42,15 @@
 - 暂存与已执行脚本：`/home/ubuntu/docmind-releases/20261110-rag-agent-02/`。
 - 部署脚本在切换前停止服务并备份代码和数据；切换失败时恢复旧源码并启动服务，保留当前运行数据与配置，避免覆盖可能新增的用户数据。本次未触发回滚。
 - 不需要初始化服务器、重装依赖、替换 systemd/nginx 配置或迁移数据库。
+
+## 同日后续：修复浏览器进入互选网站的问题
+
+- 原部署的 HTTP 80 端口服务 DocMind，HTTPS 443 根路径服务互选网站。浏览器会将 HTTP 请求升级为 HTTPS；互选站也返回了 HSTS 响应头。单独验证 HTTP 返回 200 不足以证明浏览器的最终入口正确。
+- 新增独立入口 `https://42.192.115.149/docmind/`，HTTPS 根路径和 `/accounts/login/` 继续属于互选网站。
+- FastAPI 同时挂载根路径和 `/docmind`，共享同一状态对象；前端根据当前入口解析 API 地址，静态资源和 Swagger 的 OpenAPI URL 均支持前缀。
+- Nginx 只在现有 HTTPS server 中增加 include 片段，保留原来的根路径、静态文件及登录代理，不改变 TLS、HSTS 或互选站应用配置。
+- 新增路径回归后，Windows 与 Linux 均为 127 项 Python 测试通过，另有 2 项 Node 路径测试通过。独立代码审查未发现重要问题。
+- 公网核验：页面与静态资源匹配本地、API 文档指向带前缀的 OpenAPI、普通问答和 Agent 请求正常完成。浏览器中已观察到新路径对应 DocMind 标题；互选根路径仍为原来的登录跳转。
+- 数据仍为 115 份文档、125 个片段，原 `.env` 保留。
+- 首次切换因 Nginx 重载后的短暂旧响应返回 404 而触发自动回滚；增加有限健康等待后再次切换成功。
+- 修复前源码备份：`/home/ubuntu/docmind-backups/docmind-before-prefix-20261110045738.tar.gz`；HTTPS 配置备份：`/home/ubuntu/docmind-backups/college-match-before-prefix-20261110045738.conf`。

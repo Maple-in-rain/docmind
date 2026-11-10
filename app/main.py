@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
 from .api import agent, chat, documents, health, search
 from .services import build_services
@@ -39,3 +40,17 @@ app.include_router(agent.router)
 
 _frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")
+
+# 两个入口共用同一服务实例；Mount 负责传递 root_path，API 文档也能使用前缀。
+_docmind_app = app
+app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+app.state = _docmind_app.state
+
+
+@app.get("/docmind", include_in_schema=False)
+async def docmind_entry():
+    return RedirectResponse("/docmind/", status_code=307)
+
+
+app.mount("/docmind", _docmind_app, name="docmind")
+app.mount("/", _docmind_app, name="root")

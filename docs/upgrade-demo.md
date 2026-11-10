@@ -9,6 +9,12 @@
 - 执行上限：6 次工具调用、8 次模型回复、90 秒任务预算；相同参数的重复调用跳过但仍消耗调用预算。刚好用完工具预算后，允许在剩余模型轮数及时间内生成最终报告，不再执行工具。
 - 前端：普通问答/方案分析模式、计划与查找记录、终止状态、报告复制。报告以纯文本 Markdown 展示，沿用现有页面风格。
 
+## 在线入口
+
+使用 [DocMind HTTPS 演示](https://42.192.115.149/docmind/)。同一服务器的 HTTPS 根路径属于互选网站；浏览器自动升级旧 HTTP 链接时可能进入另一个应用。DocMind 的页面、静态文件、API 和 API 文档均可通过 `/docmind/` 前缀访问。
+
+共站部署时，将 `deploy/nginx-docmind-prefix.conf` 以 include 的方式放入已有 HTTPS server 块中，保留原有 `location /`。该配置不剥离 URI 前缀，应用的 Mount 负责处理它。
+
 ## 启动与演示
 
 正常启动沿用 README；接口使用服务器已有 Provider 配置。工具调用协议参考 [DeepSeek 官方文档](https://api-docs.deepseek.com/guides/tool_calls/)。模型名称仍由 `DEEPSEEK_MODEL` 配置；如供应商已调整模型别名，请使用账户当前支持的工具调用模型。
